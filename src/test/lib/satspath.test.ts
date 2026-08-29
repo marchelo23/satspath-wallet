@@ -123,9 +123,12 @@ describe('SatsPath Multi-Rail Lib', () => {
       // from the even-Y variant. Stripping the prefix silently would use the
       // wrong verification key; instead verifySatsPathProfileSignature must
       // return false so signers cannot substitute parity.
+      // The signature is over the 03-prefix profile so this is a true test of
+      // parity-substitution rejection, not just a bad-signature catch.
       const oddYProfile: SignedPaymentProfile = {
         profile: { ...baseProfile, identity_pubkey: `03${testPubKeyHex}` },
-        signature: signSatsPathProfile(baseProfile, testPrivKey).signature,
+        signature: signSatsPathProfile({ ...baseProfile, identity_pubkey: `03${testPubKeyHex}` }, testPrivKey)
+          .signature,
       }
       expect(verifySatsPathProfileSignature(oddYProfile)).toBe(false)
     })

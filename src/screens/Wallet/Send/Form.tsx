@@ -465,6 +465,8 @@ export default function SendForm() {
               arkAddress: undefined,
               lnUrl: undefined,
               address: undefined,
+              invoice: undefined,
+              pendingLnSend: undefined,
             }))
             setRecipientError('SatsPath profile signature is invalid')
             setSatsPathLoading(false)
