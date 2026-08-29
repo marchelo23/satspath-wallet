@@ -327,7 +327,11 @@ export default function SendForm() {
   // repeat when asset changes to re-validate addresses (e.g. if user
   // selects an asset and the address is not compatible with it)
   useEffect(() => {
-    if (!readyToParse) return
+    const isSatsPathRecipient = isSatsPathIdentifier(recipient)
+    if (!readyToParse) {
+      if (!isSatsPathRecipient) setSatsPathLoading(false)
+      return
+    }
     setRecipientError('')
     // Cancellation flag: set to true by the cleanup function so that any
     // in-flight async resolution (resolveSatsPathProfile) that completes
@@ -335,8 +339,12 @@ export default function SendForm() {
     // state that a newer parse has already written.
     let cancelled = false
     const parseRecipient = async () => {
-      if (!recipient) return
+      if (!recipient) {
+        setSatsPathLoading(false)
+        return
+      }
       const lowerCaseData = recipient.toLowerCase().replace(/^lightning:/, '')
+      if (!isSatsPathRecipient) setSatsPathLoading(false)
       if (isURLWithLightningQueryString(recipient)) {
         const url = new URL(recipient)
         return setRecipient(url.searchParams.get('lightning')!)
@@ -436,7 +444,7 @@ export default function SendForm() {
           consoleError(err, 'error parsing ark note')
         }
       }
-      if (isSatsPathIdentifier(recipient)) {
+      if (isSatsPathRecipient) {
         setSatsPathLoading(true)
         try {
           const profile = await resolveSatsPathProfile(recipient)
