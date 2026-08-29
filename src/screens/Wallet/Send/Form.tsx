@@ -30,7 +30,14 @@ import { ConfigContext } from '../../../providers/config'
 import { FiatContext } from '../../../providers/fiat'
 import { ArkNote, AssetDetails, isValidArkAddress, type NetworkName } from '@arkade-os/sdk'
 import { LimitsContext } from '../../../providers/limits'
-import { checkLnUrlConditions, fetchInvoice, fetchArkAddress, isValidLnUrl, LnUrlResponse } from '../../../lib/lnurl'
+import {
+  checkLnUrlConditions,
+  fetchInvoice,
+  fetchArkAddress,
+  isValidLnUrl,
+  isSafeLnUrl,
+  LnUrlResponse,
+} from '../../../lib/lnurl'
 import { extractError } from '../../../lib/error'
 import { decodeInvoice } from '../../../lib/bolt11'
 import { lnSendRendezvous, requestLnSend } from '../../../lib/lnSwap'
@@ -332,6 +339,7 @@ export default function SendForm() {
     const clearRecipientResolution = () => {
       setSatsPathProfile(null)
       setSatsPathAnalysis(null)
+      setLnUrlResponse(null)
       setSendInfo((prev) => ({
         ...prev,
         address: undefined,
@@ -639,10 +647,11 @@ export default function SendForm() {
       }
     } else if (rail === 'Lightning') {
       const m = methods.find((m) => m.type === 'Lightning') as any
-      if (m?.lightning_address || m?.lnurl) {
+      const target = m?.lightning_address || m?.lnurl
+      if (target && isSafeLnUrl(target)) {
         setSendInfo((prev) => ({
           ...prev,
-          lnUrl: m.lightning_address || m.lnurl,
+          lnUrl: target,
           arkAddress: undefined,
           address: undefined,
           invoice: undefined,
@@ -708,9 +717,7 @@ export default function SendForm() {
         })
         .catch((err) => {
           if (cancelled) return
-          consoleError('Branta API error', err)
-          setBrantaPayment(null)
-          setBrantaVerifyUrl(undefined)
+          consoleError(err, 'branta lookup error')
         })
         .finally(() => {
           if (cancelled) return
@@ -747,14 +754,18 @@ export default function SendForm() {
   // check lnurl conditions
   useEffect(() => {
     const targetLnUrl = sendInfo.lnUrl
-    if (!targetLnUrl) return
-    if (sendInfo.arkAddress) return
-    if (sendInfo.invoice) return
+    if (!targetLnUrl || sendInfo.arkAddress || sendInfo.invoice || !isSafeLnUrl(targetLnUrl)) {
+      setLnUrlResponse(null)
+      return
+    }
     let cancelled = false
     checkLnUrlConditions(targetLnUrl)
       .then((conditions) => {
         if (cancelled) return
-        if (!conditions) return setRecipientError('Unable to fetch LNURL conditions')
+        if (!conditions) {
+          setLnUrlResponse(null)
+          return setRecipientError('Unable to fetch LNURL conditions')
+        }
         const min = Math.floor(conditions.minSendable / 1000) // from millisatoshis to satoshis
         const max = Math.floor(conditions.maxSendable / 1000) // from millisatoshis to satoshis
         // when the LNURL resolves to a fixed amount, set amountTextValue
@@ -770,6 +781,7 @@ export default function SendForm() {
       })
       .catch((e) => {
         if (cancelled) return
+        setLnUrlResponse(null)
         if (e.status === 404) {
           consoleError(e, 'LNURL not found')
           setRecipientError('LNURL not found')

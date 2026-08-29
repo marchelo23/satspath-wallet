@@ -66,6 +66,58 @@ const isLnAddress = (data: string) => {
 
 export const isValidLnUrl = (data: string): boolean => isLnUrl(data) || isLnAddress(data)
 
+/**
+ * Validates that an LNURL endpoint or callback URL uses HTTPS and does not
+ * point to localhost, loopback, link-local, or private-network IP ranges (SSRF prevention).
+ */
+export const isSafeLnUrlEndpoint = (rawUrl: string): boolean => {
+  try {
+    const parsed = new URL(rawUrl)
+    if (parsed.protocol !== 'https:') return false
+    const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+    if (
+      !hostname ||
+      hostname === 'localhost' ||
+      hostname.endsWith('.localhost') ||
+      hostname.endsWith('.local') ||
+      hostname.endsWith('.internal') ||
+      hostname === '0.0.0.0' ||
+      hostname === '::' ||
+      hostname === '::1' ||
+      hostname.startsWith('127.') ||
+      hostname.startsWith('10.') ||
+      hostname.startsWith('192.168.') ||
+      hostname.startsWith('169.254.') ||
+      hostname.startsWith('fe80:') ||
+      hostname.startsWith('fc') ||
+      hostname.startsWith('fd')
+    ) {
+      return false
+    }
+    const match172 = hostname.match(/^172\.(\d+)\./)
+    if (match172) {
+      const secondOctet = parseInt(match172[1], 10)
+      if (secondOctet >= 16 && secondOctet <= 31) return false
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Validates that a Lightning address or LNURL string parses and resolves to a safe HTTPS endpoint.
+ */
+export const isSafeLnUrl = (data: string): boolean => {
+  if (!isValidLnUrl(data)) return false
+  try {
+    const url = getCallbackUrl(data)
+    return isSafeLnUrlEndpoint(url)
+  } catch {
+    return false
+  }
+}
+
 export const getCallbackUrl = (lnurl: string): string => {
   if (isLnAddress(lnurl)) {
     // Lightning address
@@ -79,21 +131,47 @@ export const getCallbackUrl = (lnurl: string): string => {
 
 export const checkLnUrlConditions = (lnurl: string): Promise<LnUrlResponse> => {
   return new Promise<LnUrlResponse>((resolve, reject) => {
-    const url = getCallbackUrl(lnurl)
+    let url: string
+    try {
+      url = getCallbackUrl(lnurl)
+    } catch (e) {
+      return reject(e)
+    }
+    if (!isSafeLnUrlEndpoint(url)) {
+      return reject(new Error('Insecure or prohibited LNURL endpoint'))
+    }
     fetch(url)
       .then(checkResponse<LnUrlResponse>)
-      .then(resolve)
+      .then((data) => {
+        if (data.callback && !isSafeLnUrlEndpoint(data.callback)) {
+          throw new Error('Insecure or prohibited callback URL in LNURL response')
+        }
+        resolve(data)
+      })
       .catch(reject)
   })
 }
 
 export const fetchInvoice = (lnurl: string, sats: number, note: string): Promise<string> => {
   return new Promise<string>((resolve, reject) => {
-    const url = getCallbackUrl(lnurl)
+    let url: string
+    try {
+      url = getCallbackUrl(lnurl)
+    } catch (e) {
+      return reject(e)
+    }
+    if (!isSafeLnUrlEndpoint(url)) {
+      return reject(new Error('Insecure or prohibited LNURL endpoint'))
+    }
     const amount = Math.round(sats * 1000) // millisatoshis
     fetch(url)
       .then(checkResponse<LnUrlResponse>)
-      .then((data) => checkLnUrlResponse(amount, data))
+      .then((data) => {
+        if (data.callback && !isSafeLnUrlEndpoint(data.callback)) {
+          throw new Error('Insecure or prohibited callback URL in LNURL response')
+        }
+        return checkLnUrlResponse(amount, data)
+      })
       .then((data) => fetchLnUrlInvoice(amount, note, data))
       .then(resolve)
       .catch(reject)
@@ -102,8 +180,16 @@ export const fetchInvoice = (lnurl: string, sats: number, note: string): Promise
 
 export const fetchArkAddress = (lnurl: string): Promise<ArkMethodResponse> => {
   return new Promise<ArkMethodResponse>((resolve, reject) => {
-    const url = getCallbackUrl(lnurl) + '?method=ark'
-    fetch(url)
+    let url: string
+    try {
+      url = getCallbackUrl(lnurl)
+    } catch (e) {
+      return reject(e)
+    }
+    if (!isSafeLnUrlEndpoint(url)) {
+      return reject(new Error('Insecure or prohibited LNURL endpoint'))
+    }
+    fetch(url + '?method=ark')
       .then(checkResponse<ArkMethodResponse>)
       .then(resolve)
       .catch(reject)
