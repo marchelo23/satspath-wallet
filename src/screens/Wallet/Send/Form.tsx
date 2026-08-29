@@ -746,23 +746,30 @@ export default function SendForm() {
 
   // check lnurl conditions
   useEffect(() => {
-    if (!sendInfo.lnUrl) return
+    const targetLnUrl = sendInfo.lnUrl
+    if (!targetLnUrl) return
     if (sendInfo.arkAddress) return
-    if (sendInfo.lnUrl && sendInfo.invoice) return
-    checkLnUrlConditions(sendInfo.lnUrl)
+    if (sendInfo.invoice) return
+    let cancelled = false
+    checkLnUrlConditions(targetLnUrl)
       .then((conditions) => {
+        if (cancelled) return
         if (!conditions) return setRecipientError('Unable to fetch LNURL conditions')
         const min = Math.floor(conditions.minSendable / 1000) // from millisatoshis to satoshis
         const max = Math.floor(conditions.maxSendable / 1000) // from millisatoshis to satoshis
         // when the LNURL resolves to a fixed amount, set amountTextValue
         if (min === max) {
-          setSendInfo({ ...sendInfo, satoshis: min })
+          setSendInfo((prev) => {
+            if (prev.lnUrl !== targetLnUrl) return prev
+            return { ...prev, satoshis: min }
+          })
           setAmountTextValue(getTextValue(min))
           setAmountIsReadOnly(true)
         }
-        return setLnUrlResponse({ ...conditions, minSendable: min, maxSendable: max })
+        setLnUrlResponse({ ...conditions, minSendable: min, maxSendable: max })
       })
       .catch((e) => {
+        if (cancelled) return
         if (e.status === 404) {
           consoleError(e, 'LNURL not found')
           setRecipientError('LNURL not found')
@@ -771,7 +778,10 @@ export default function SendForm() {
         consoleError(e, 'Error checking LNURL conditions')
         setRecipientError(extractError(e))
       })
-  }, [sendInfo.arkAddress, sendInfo.lnUrl])
+    return () => {
+      cancelled = true
+    }
+  }, [sendInfo.arkAddress, sendInfo.lnUrl, sendInfo.invoice])
 
   // check if user wants to send all funds
   useEffect(() => {

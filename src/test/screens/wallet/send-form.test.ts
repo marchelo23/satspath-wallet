@@ -130,7 +130,7 @@ describe('Send form amount editability', () => {
     // each parse run.
     renderSendForm()
 
-    const recipientInput = document.querySelector('input[name="send-recipient"]') as HTMLInputElement
+    const recipientInput = document.querySelector('input[name="send-address"]') as HTMLInputElement
     const amountInput = document.querySelector('input[name="send-amount"]') as HTMLInputElement
 
     // Step 1: type the invoice — this should lock the amount field
