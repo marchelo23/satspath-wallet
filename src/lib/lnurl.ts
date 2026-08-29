@@ -30,15 +30,13 @@ const LNURL_TIMEOUT_MS = 10_000
 
 const fetchWithTimeout = async (url: string, options: RequestInit = {}): Promise<Response> => {
   let timeoutId: any
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error('LNURL request timed out'))
+    }, LNURL_TIMEOUT_MS)
+  })
   try {
-    if (typeof AbortController !== 'undefined') {
-      const controller = new AbortController()
-      timeoutId = setTimeout(() => controller.abort(), LNURL_TIMEOUT_MS)
-      const isSignalInstance = typeof AbortSignal !== 'undefined' && controller.signal instanceof AbortSignal
-      const requestOptions: RequestInit = isSignalInstance ? { ...options, signal: controller.signal } : { ...options }
-      return await fetch(url, requestOptions)
-    }
-    return await fetch(url, options)
+    return await Promise.race([fetch(url, options), timeoutPromise])
   } finally {
     if (timeoutId) clearTimeout(timeoutId)
   }
