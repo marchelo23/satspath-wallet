@@ -29,19 +29,15 @@ type LnUrlCallbackResponse = {
 const LNURL_TIMEOUT_MS = 10_000
 
 const fetchWithTimeout = async (url: string, options: RequestInit = {}): Promise<Response> => {
-  let signal: AbortSignal | undefined
-  let timeoutId: NodeJS.Timeout | undefined
-  if (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal) {
-    signal = AbortSignal.timeout(LNURL_TIMEOUT_MS)
-  } else {
-    const controller = new AbortController()
-    timeoutId = setTimeout(() => controller.abort(), LNURL_TIMEOUT_MS)
-    signal = controller.signal
+  if (typeof AbortController === 'undefined') {
+    return fetch(url, options)
   }
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), LNURL_TIMEOUT_MS)
   try {
-    return await fetch(url, { ...options, signal })
+    return await fetch(url, { ...options, signal: controller.signal })
   } finally {
-    if (timeoutId) clearTimeout(timeoutId)
+    clearTimeout(timeoutId)
   }
 }
 
