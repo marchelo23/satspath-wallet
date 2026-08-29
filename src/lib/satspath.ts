@@ -18,7 +18,7 @@ import {
 } from '@satspath/router'
 import { schnorr } from '@noble/curves/secp256k1.js'
 import { sha256 } from '@noble/hashes/sha2.js'
-import { bytesToHex } from '@noble/hashes/utils.js'
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js'
 import { consoleError } from './logs'
 
 export interface SatsPathRailQuote {
@@ -113,7 +113,7 @@ export function verifySatsPathProfileSignature(signedProfile: SignedPaymentProfi
 
     const messageBytes = new TextEncoder().encode(JSON.stringify(signedProfile.profile))
     const messageHash = sha256(messageBytes)
-    return schnorr.verify(sigHex, messageHash, pubkeyHex)
+    return schnorr.verify(hexToBytes(sigHex), messageHash, hexToBytes(pubkeyHex))
   } catch {
     return false
   }
