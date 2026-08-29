@@ -329,6 +329,11 @@ export default function SendForm() {
   useEffect(() => {
     if (!readyToParse) return
     setRecipientError('')
+    // Cancellation flag: set to true by the cleanup function so that any
+    // in-flight async resolution (resolveSatsPathProfile) that completes
+    // after the effect re-runs is silently discarded and does not overwrite
+    // state that a newer parse has already written.
+    let cancelled = false
     const parseRecipient = async () => {
       if (!recipient) return
       const lowerCaseData = recipient.toLowerCase().replace(/^lightning:/, '')
@@ -435,6 +440,8 @@ export default function SendForm() {
         setSatsPathLoading(true)
         try {
           const profile = await resolveSatsPathProfile(recipient)
+          // Discard if this effect run has been superseded.
+          if (cancelled) return
           if (profile && verifySatsPathProfileSignature(profile)) {
             setSatsPathProfile(profile)
             const arkMethod = profile.profile.methods.find((m) => m.type === 'Ark') as any
@@ -474,6 +481,7 @@ export default function SendForm() {
             return
           }
         } catch (err) {
+          if (cancelled) return
           consoleError(err, 'SatsPath alias resolve error')
         }
         setSatsPathLoading(false)
@@ -485,6 +493,9 @@ export default function SendForm() {
       setReadyToParse(false)
     }
     parseRecipient()
+    return () => {
+      cancelled = true
+    }
   }, [recipient, isAssetSend, readyToParse])
 
   // SatsPath Multi-rail dynamic routing effect
