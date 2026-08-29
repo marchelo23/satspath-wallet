@@ -117,6 +117,40 @@ describe('SatsPath Multi-Rail Lib', () => {
       }
       expect(verifySatsPathProfileSignature(invalidSigProfile)).toBe(false)
     })
+
+    it('rejects profiles with an odd-Y (03) prefixed identity_pubkey', () => {
+      // A 03-prefix pubkey represents odd-Y parity, which is a different key
+      // from the even-Y variant. Stripping the prefix silently would use the
+      // wrong verification key; instead verifySatsPathProfileSignature must
+      // return false so signers cannot substitute parity.
+      const oddYProfile: SignedPaymentProfile = {
+        profile: { ...baseProfile, identity_pubkey: `03${testPubKeyHex}` },
+        signature: signSatsPathProfile(baseProfile, testPrivKey).signature,
+      }
+      expect(verifySatsPathProfileSignature(oddYProfile)).toBe(false)
+    })
+
+    it('rejects profiles whose expires_at is in the past', () => {
+      const expiredProfile = signSatsPathProfile(
+        { ...baseProfile, expires_at: Math.floor(Date.now() / 1000) - 3600 },
+        testPrivKey,
+      )
+      expect(verifySatsPathProfileSignature(expiredProfile)).toBe(false)
+    })
+
+    it('accepts profiles whose expires_at is in the future', () => {
+      const futureProfile = signSatsPathProfile(
+        { ...baseProfile, expires_at: Math.floor(Date.now() / 1000) + 86400 },
+        testPrivKey,
+      )
+      expect(verifySatsPathProfileSignature(futureProfile)).toBe(true)
+    })
+
+    it('accepts profiles with no expires_at field', () => {
+      // expires_at is optional; absence must not be treated as expiry.
+      const noExpiryProfile = signSatsPathProfile(baseProfile, testPrivKey)
+      expect(verifySatsPathProfileSignature(noExpiryProfile)).toBe(true)
+    })
   })
 
   describe('buildSatsPathUnifiedUri', () => {

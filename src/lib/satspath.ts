@@ -89,8 +89,43 @@ export async function getFeeEstimate(forceRefresh = false): Promise<FeeEstimate>
 }
 
 /**
+ * Returns a deterministic, sorted-key JSON string for canonical hashing.
+ * Keys are sorted recursively so property insertion order (which varies
+ * across JS engines and serializers) does not affect the digest. This
+ * matches what an external Rust serde_json signer can reproduce by using
+ * serde's `BTreeMap`-backed serialization or an equivalent sorted emitter.
+ */
+function canonicalProfileJson(profile: PaymentProfile): string {
+  // Recursively sort object keys; arrays preserve element order.
+  function sortedJson(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(sortedJson)
+    if (value !== null && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.keys(value as Record<string, unknown>)
+          .sort()
+          .map((k) => [k, sortedJson((value as Record<string, unknown>)[k])]),
+      )
+    }
+    return value
+  }
+  return JSON.stringify(sortedJson(profile))
+}
+
+/**
  * Cryptographically verifies a SatsPath profile's Schnorr signature against its identity_pubkey.
- * The message signed is the SHA-256 hash of the JSON-serialized profile object.
+ *
+ * Message: SHA-256( UTF-8( canonicalProfileJson(profile) ) )
+ * where canonicalProfileJson serializes the profile with recursively sorted
+ * object keys — matching Rust serde_json's BTreeMap order — so both sides
+ * always hash the same bytes regardless of field insertion order.
+ *
+ * Only 32-byte x-only (64 hex chars) or 02-prefixed (66 hex chars) pubkeys
+ * are accepted. 03-prefixed keys are rejected: stripping the prefix would
+ * silently use the wrong parity and break external signers that distinguish
+ * even/odd-Y keys.
+ *
+ * Profiles whose expires_at is in the past are rejected even if the
+ * signature is otherwise valid.
  */
 export function verifySatsPathProfileSignature(signedProfile: SignedPaymentProfile): boolean {
   try {
@@ -102,16 +137,29 @@ export function verifySatsPathProfileSignature(signedProfile: SignedPaymentProfi
       return false
     }
 
+    // Reject profiles that have explicitly expired.
+    const { expires_at } = signedProfile.profile
+    if (expires_at !== undefined && expires_at < Math.floor(Date.now() / 1000)) {
+      return false
+    }
+
     let pubkeyHex = signedProfile.profile.identity_pubkey.trim()
-    // Handle 33-byte compressed pubkey (02/03 prefix) or 32-byte x-only pubkey
-    if (pubkeyHex.length === 66 && (pubkeyHex.startsWith('02') || pubkeyHex.startsWith('03'))) {
-      pubkeyHex = pubkeyHex.slice(2)
+    // Only strip even-Y (02) prefix to obtain the BIP-340 x-only key.
+    // A 03-prefix denotes odd-Y parity and must NOT be silently discarded
+    // because that would cause the wrong key to be used for verification.
+    if (pubkeyHex.length === 66) {
+      if (pubkeyHex.startsWith('02')) {
+        pubkeyHex = pubkeyHex.slice(2)
+      } else {
+        // 03-prefix (odd-Y) or unknown prefix: reject rather than strip.
+        return false
+      }
     }
     if (pubkeyHex.length !== 64) {
       return false
     }
 
-    const messageBytes = new TextEncoder().encode(JSON.stringify(signedProfile.profile))
+    const messageBytes = new TextEncoder().encode(canonicalProfileJson(signedProfile.profile))
     const messageHash = sha256(messageBytes)
     return schnorr.verify(hexToBytes(sigHex), messageHash, hexToBytes(pubkeyHex))
   } catch {
@@ -121,9 +169,10 @@ export function verifySatsPathProfileSignature(signedProfile: SignedPaymentProfi
 
 /**
  * Signs a payment profile with a 32-byte secp256k1 private key, producing a SignedPaymentProfile.
+ * Uses canonicalProfileJson so the signed bytes match those used by verifySatsPathProfileSignature.
  */
 export function signSatsPathProfile(profile: PaymentProfile, privateKey: Uint8Array): SignedPaymentProfile {
-  const messageBytes = new TextEncoder().encode(JSON.stringify(profile))
+  const messageBytes = new TextEncoder().encode(canonicalProfileJson(profile))
   const messageHash = sha256(messageBytes)
   const signature = bytesToHex(schnorr.sign(messageHash, privateKey))
   return {

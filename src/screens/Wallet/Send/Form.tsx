@@ -455,7 +455,21 @@ export default function SendForm() {
             setSatsPathLoading(false)
             return
           } else if (profile) {
+            // Signature check failed — fail closed: clear all derived state and
+            // block form submission so stale destination fields cannot be used.
             consoleError(new Error('SatsPath profile signature verification failed'), 'Invalid profile signature')
+            setSatsPathProfile(null)
+            setSatsPathAnalysis(null)
+            setSendInfo((prev) => ({
+              ...prev,
+              arkAddress: undefined,
+              lnUrl: undefined,
+              address: undefined,
+            }))
+            setRecipientError('SatsPath profile signature is invalid')
+            setSatsPathLoading(false)
+            setReadyToParse(false)
+            return
           }
         } catch (err) {
           consoleError(err, 'SatsPath alias resolve error')
