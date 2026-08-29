@@ -26,6 +26,25 @@ type LnUrlCallbackResponse = {
   pr: string
 }
 
+const LNURL_TIMEOUT_MS = 10_000
+
+const fetchWithTimeout = async (url: string, options: RequestInit = {}): Promise<Response> => {
+  let signal: AbortSignal | undefined
+  let timeoutId: NodeJS.Timeout | undefined
+  if (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal) {
+    signal = AbortSignal.timeout(LNURL_TIMEOUT_MS)
+  } else {
+    const controller = new AbortController()
+    timeoutId = setTimeout(() => controller.abort(), LNURL_TIMEOUT_MS)
+    signal = controller.signal
+  }
+  try {
+    return await fetch(url, { ...options, signal })
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId)
+  }
+}
+
 const checkResponse = async <T = any>(response: Response): Promise<T> => {
   if (!response.ok) return Promise.reject(response)
   const data = await response.json()
@@ -34,6 +53,9 @@ const checkResponse = async <T = any>(response: Response): Promise<T> => {
 }
 
 const checkLnUrlResponse = (amount: number, data: LnUrlResponse) => {
+  if (!data?.callback || !isSafeLnUrlEndpoint(data.callback)) {
+    throw new Error('Insecure or prohibited callback URL in LNURL response')
+  }
   if (amount < data.minSendable || amount > data.maxSendable) {
     throw new Error('Amount not in LNURL range.')
   }
@@ -41,9 +63,12 @@ const checkLnUrlResponse = (amount: number, data: LnUrlResponse) => {
 }
 
 const fetchLnUrlInvoice = async (amount: number, note: string, data: LnUrlResponse) => {
+  if (!data?.callback || !isSafeLnUrlEndpoint(data.callback)) {
+    throw new Error('Insecure or prohibited callback URL in LNURL response')
+  }
   let url = `${data.callback}?amount=${amount}`
   if (note) url += `&comment=${note}`
-  const res = await fetch(url, { redirect: 'error' }).then(checkResponse<LnUrlCallbackResponse>)
+  const res = await fetchWithTimeout(url, { redirect: 'error' }).then(checkResponse<LnUrlCallbackResponse>)
   return res.pr
 }
 
@@ -109,6 +134,35 @@ export const isSafeLnUrlEndpoint = (rawUrl: string): boolean => {
       }
     }
 
+    // Parse single-integer / hex IPv4 representations (e.g. 2130706433 or 0x7f000001)
+    if (/^(0x[0-9a-f]+|\d+)$/i.test(hostname)) {
+      const num = parseInt(hostname, hostname.startsWith('0x') || hostname.startsWith('0X') ? 16 : 10)
+      if (!isNaN(num) && num >= 0 && num <= 0xffffffff) {
+        const b1 = (num >>> 24) & 0xff
+        const b2 = (num >>> 16) & 0xff
+        const b3 = (num >>> 8) & 0xff
+        const b4 = num & 0xff
+        hostname = `${b1}.${b2}.${b3}.${b4}`
+      } else {
+        return false
+      }
+    }
+
+    // Parse dotted octal / hex / decimal IPv4 formats
+    const ipv4Parts = hostname.split('.')
+    if (ipv4Parts.length === 4 && ipv4Parts.every((p) => /^(0x[0-9a-f]+|0[0-7]*|\d+)$/i.test(p))) {
+      const octets = ipv4Parts.map((p) => {
+        if (p.startsWith('0x') || p.startsWith('0X')) return parseInt(p, 16)
+        if (p.startsWith('0') && p.length > 1) return parseInt(p, 8)
+        return parseInt(p, 10)
+      })
+      if (octets.every((o) => !isNaN(o) && o >= 0 && o <= 255)) {
+        hostname = octets.join('.')
+      } else {
+        return false
+      }
+    }
+
     if (
       hostname.startsWith('127.') ||
       hostname.startsWith('10.') ||
@@ -119,14 +173,23 @@ export const isSafeLnUrlEndpoint = (rawUrl: string): boolean => {
       return false
     }
 
-    // Check IPv6 link-local (fe80::/10 includes fe80-febf) and unique-local (fc00::/7)
-    if (
-      /^fe[89ab][0-9a-f]:/i.test(hostname) ||
-      hostname.startsWith('fe80:') ||
-      hostname.startsWith('fc') ||
-      hostname.startsWith('fd')
-    ) {
-      return false
+    // CGNAT range (100.64.0.0/10: 100.64.0.0 - 100.127.255.255)
+    const match100 = hostname.match(/^100\.(\d+)\./)
+    if (match100) {
+      const secondOctet = parseInt(match100[1], 10)
+      if (secondOctet >= 64 && secondOctet <= 127) return false
+    }
+
+    // Check IPv6 link-local (fe80::/10 includes fe80-febf) and unique-local (fc00::/7) only for IPv6 literals
+    if (hostname.includes(':')) {
+      if (
+        /^fe[89ab][0-9a-f]:/i.test(hostname) ||
+        hostname.startsWith('fe80:') ||
+        hostname.startsWith('fc') ||
+        hostname.startsWith('fd')
+      ) {
+        return false
+      }
     }
 
     const match172 = hostname.match(/^172\.(\d+)\./)
@@ -178,10 +241,10 @@ export const checkLnUrlConditions = (lnurl: string): Promise<LnUrlResponse> => {
     if (!isSafeLnUrlEndpoint(url)) {
       return reject(new Error('Insecure or prohibited LNURL endpoint'))
     }
-    fetch(url, { redirect: 'error' })
+    fetchWithTimeout(url, { redirect: 'error' })
       .then(checkResponse<LnUrlResponse>)
       .then((data) => {
-        if (data.callback && !isSafeLnUrlEndpoint(data.callback)) {
+        if (!data?.callback || !isSafeLnUrlEndpoint(data.callback)) {
           throw new Error('Insecure or prohibited callback URL in LNURL response')
         }
         resolve(data)
@@ -205,10 +268,10 @@ export const fetchInvoice = (lnurl: string, sats: number, note: string): Promise
       return reject(new Error('Insecure or prohibited LNURL endpoint'))
     }
     const amount = Math.round(sats * 1000) // millisatoshis
-    fetch(url, { redirect: 'error' })
+    fetchWithTimeout(url, { redirect: 'error' })
       .then(checkResponse<LnUrlResponse>)
       .then((data) => {
-        if (data.callback && !isSafeLnUrlEndpoint(data.callback)) {
+        if (!data?.callback || !isSafeLnUrlEndpoint(data.callback)) {
           throw new Error('Insecure or prohibited callback URL in LNURL response')
         }
         return checkLnUrlResponse(amount, data)
@@ -233,7 +296,7 @@ export const fetchArkAddress = (lnurl: string): Promise<ArkMethodResponse> => {
     if (!isSafeLnUrlEndpoint(url)) {
       return reject(new Error('Insecure or prohibited LNURL endpoint'))
     }
-    fetch(url + '?method=ark', { redirect: 'error' })
+    fetchWithTimeout(url + '?method=ark', { redirect: 'error' })
       .then(checkResponse<ArkMethodResponse>)
       .then(resolve)
       .catch(reject)

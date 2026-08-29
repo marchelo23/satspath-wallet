@@ -51,6 +51,8 @@ describe('lnurl utilities', () => {
     it('accepts valid public HTTPS endpoints and addresses', () => {
       expect(isSafeLnUrlEndpoint('https://pay.staging.galoy.io/.well-known/lnurlp/test')).toBe(true)
       expect(isSafeLnUrlEndpoint('https://example.com/lnurlp/alice')).toBe(true)
+      expect(isSafeLnUrlEndpoint('https://fda.gov/lnurlp/alice')).toBe(true)
+      expect(isSafeLnUrlEndpoint('https://fcc.gov/lnurlp/alice')).toBe(true)
       expect(isSafeLnUrl('alice@example.com')).toBe(true)
     })
 
@@ -67,7 +69,7 @@ describe('lnurl utilities', () => {
       expect(isSafeLnUrl('user@localhost')).toBe(false)
     })
 
-    it('rejects loopback and private IP addresses', () => {
+    it('rejects loopback, private, and CGNAT IP addresses in various encodings', () => {
       expect(isSafeLnUrlEndpoint('https://127.0.0.1/lnurlp')).toBe(false)
       expect(isSafeLnUrlEndpoint('https://127.0.1.1/lnurlp')).toBe(false)
       expect(isSafeLnUrlEndpoint('https://10.0.0.1/lnurlp')).toBe(false)
@@ -75,6 +77,11 @@ describe('lnurl utilities', () => {
       expect(isSafeLnUrlEndpoint('https://172.16.0.1/lnurlp')).toBe(false)
       expect(isSafeLnUrlEndpoint('https://172.31.255.255/lnurlp')).toBe(false)
       expect(isSafeLnUrlEndpoint('https://169.254.169.254/lnurlp')).toBe(false)
+      expect(isSafeLnUrlEndpoint('https://100.64.0.1/lnurlp')).toBe(false)
+      expect(isSafeLnUrlEndpoint('https://100.127.255.255/lnurlp')).toBe(false)
+      expect(isSafeLnUrlEndpoint('https://2130706433/lnurlp')).toBe(false)
+      expect(isSafeLnUrlEndpoint('https://0177.0.0.1/lnurlp')).toBe(false)
+      expect(isSafeLnUrlEndpoint('https://0x7f.0.0.1/lnurlp')).toBe(false)
       expect(isSafeLnUrlEndpoint('https://[::1]/lnurlp')).toBe(false)
       expect(isSafeLnUrlEndpoint('https://[::ffff:127.0.0.1]/lnurlp')).toBe(false)
       expect(isSafeLnUrlEndpoint('https://[::ffff:10.0.0.1]/lnurlp')).toBe(false)

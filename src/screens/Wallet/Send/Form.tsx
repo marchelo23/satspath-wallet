@@ -191,6 +191,8 @@ export default function SendForm() {
 
   const timeoutRef = useRef<NodeJS.Timeout>()
   const recipientParseStartedRef = useRef(false)
+  const appliedRecommendationRef = useRef<string | null>(null)
+  const userSelectedRailRef = useRef(false)
 
   const prefersReducedMotion = useReducedMotion()
   const accountAsset = useMemo<AssetOption | null>(
@@ -512,11 +514,6 @@ export default function SendForm() {
           if (cancelled) return
           if (profile && verifySatsPathProfileSignature(profile)) {
             setSatsPathProfile(profile)
-            // Do not pre-populate all destination fields at once: the routing
-            // analysis effect will fire next and call handleSelectRail with the
-            // recommended rail, writing exactly one destination field to sendInfo.
-            // Pre-populating all three would leave multiple active destinations
-            // visible to handleContinue before the user picks a rail.
             setSendInfo((prev) => ({
               ...prev,
               arkAddress: undefined,
@@ -529,8 +526,6 @@ export default function SendForm() {
             setSatsPathLoading(false)
             return
           } else if (profile) {
-            // Signature check failed — fail closed: clear all derived state and
-            // block form submission so stale destination fields cannot be used.
             consoleError(new Error('SatsPath profile signature verification failed'), 'Invalid profile signature')
             clearRecipientResolution()
             setRecipientError('SatsPath profile signature is invalid')
@@ -551,6 +546,12 @@ export default function SendForm() {
         setSatsPathLoading(false)
       }
       if (isValidLnUrl(lowerCaseData)) {
+        if (!isSafeLnUrl(lowerCaseData)) {
+          clearRecipientResolution()
+          setRecipientError('Insecure or invalid LNURL destination')
+          setReadyToParse(false)
+          return
+        }
         return setSendInfo((prev) => ({
           ...prev,
           address: undefined,
@@ -581,11 +582,11 @@ export default function SendForm() {
       analyzeSatsPathRoutes(satsPathProfile, currentSats, urgency, recipient).then((analysis) => {
         if (cancelled) return
         setSatsPathAnalysis(analysis)
-        // Apply the recommended rail immediately so sendInfo contains only the
-        // single destination for that rail. handleSelectRail already handles
-        // clearing the other fields, so this keeps the state consistent without
-        // requiring a manual UI selection.
-        handleSelectRail(analysis.recommendedRail)
+        const profileKey = satsPathProfile.profile.identity_pubkey + ':' + satsPathProfile.profile.alias
+        if (!userSelectedRailRef.current && appliedRecommendationRef.current !== profileKey) {
+          appliedRecommendationRef.current = profileKey
+          handleSelectRail(analysis.recommendedRail, false)
+        }
       })
     } else if (sendInfo.address || sendInfo.arkAddress || sendInfo.lnUrl || sendInfo.invoice) {
       const methods: any[] = []
@@ -629,7 +630,10 @@ export default function SendForm() {
     recipient,
   ])
 
-  const handleSelectRail = (rail: 'Ark' | 'Lightning' | 'Onchain') => {
+  const handleSelectRail = (rail: 'Ark' | 'Lightning' | 'Onchain', isManual = false) => {
+    if (isManual) {
+      userSelectedRailRef.current = true
+    }
     setSelectedRail(rail)
     if (!satsPathProfile) return
     const { methods } = satsPathProfile.profile
@@ -666,6 +670,9 @@ export default function SendForm() {
           invoice: undefined,
           pendingLnSend: undefined,
         }))
+        if (isManual) {
+          setRecipientError('Invalid or insecure Lightning destination in profile')
+        }
       }
     } else if (rail === 'Onchain') {
       const m = methods.find((m) => m.type === 'Onchain') as any
@@ -764,11 +771,11 @@ export default function SendForm() {
   useEffect(() => {
     const targetLnUrl = sendInfo.lnUrl
     if (!targetLnUrl || sendInfo.arkAddress || sendInfo.invoice) {
-      setLnUrlResponse(null)
+      setLnUrlResponse(undefined)
       return
     }
     if (!isSafeLnUrl(targetLnUrl)) {
-      setLnUrlResponse(null)
+      setLnUrlResponse(undefined)
       setSendInfo((prev) => ({ ...prev, lnUrl: undefined }))
       setRecipientError('Insecure or invalid LNURL destination')
       return
@@ -778,7 +785,7 @@ export default function SendForm() {
       .then((conditions) => {
         if (cancelled) return
         if (!conditions) {
-          setLnUrlResponse(null)
+          setLnUrlResponse(undefined)
           return setRecipientError('Unable to fetch LNURL conditions')
         }
         const min = Math.floor(conditions.minSendable / 1000) // from millisatoshis to satoshis
@@ -796,7 +803,7 @@ export default function SendForm() {
       })
       .catch((e) => {
         if (cancelled) return
-        setLnUrlResponse(null)
+        setLnUrlResponse(undefined)
         if (e.status === 404) {
           consoleError(e, 'LNURL not found')
           setRecipientError('LNURL not found')
@@ -1423,7 +1430,7 @@ export default function SendForm() {
                 <SatsPathRouteSelector
                   analysis={satsPathAnalysis}
                   selectedRail={selectedRail}
-                  onSelectRail={handleSelectRail}
+                  onSelectRail={(rail) => handleSelectRail(rail, true)}
                   urgency={urgency}
                   onChangeUrgency={setUrgency}
                 />

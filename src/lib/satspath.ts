@@ -62,8 +62,15 @@ export function isSatsPathIdentifier(input: string): boolean {
  */
 export async function resolveSatsPathProfile(identifier: string): Promise<SignedPaymentProfile | null> {
   try {
-    const clean = identifier.trim().replace(/^₿/, '')
+    const clean = identifier.trim().replace(/^₿/, '').toLowerCase()
     const profile = await resolveAlias(clean)
+    if (profile && profile.profile && profile.profile.alias) {
+      const profileAlias = profile.profile.alias.trim().replace(/^₿/, '').toLowerCase()
+      if (profileAlias !== clean) {
+        consoleError(null, `SatsPath alias mismatch: expected ${clean}, got ${profileAlias}`)
+        return null
+      }
+    }
     return profile
   } catch (err) {
     consoleError(err, 'SatsPath alias resolution not found or failed')
@@ -88,21 +95,32 @@ export async function getFeeEstimate(forceRefresh = false): Promise<FeeEstimate>
   }
 }
 
+const utf8Encoder = new TextEncoder()
+function utf8Compare(a: string, b: string): number {
+  const bufA = utf8Encoder.encode(a)
+  const bufB = utf8Encoder.encode(b)
+  const minLen = Math.min(bufA.length, bufB.length)
+  for (let i = 0; i < minLen; i++) {
+    if (bufA[i] !== bufB[i]) return bufA[i] - bufB[i]
+  }
+  return bufA.length - bufB.length
+}
+
 /**
  * Returns a deterministic, sorted-key JSON string for canonical hashing.
- * Keys are sorted recursively so property insertion order (which varies
- * across JS engines and serializers) does not affect the digest. This
+ * Keys are sorted recursively by UTF-8 byte ordering so property insertion order
+ * (which varies across JS engines and serializers) does not affect the digest. This
  * matches what an external Rust serde_json signer can reproduce by using
  * serde's `BTreeMap`-backed serialization or an equivalent sorted emitter.
  */
 function canonicalProfileJson(profile: PaymentProfile): string {
-  // Recursively sort object keys; arrays preserve element order.
+  // Recursively sort object keys by UTF-8 byte representation; arrays preserve element order.
   function sortedJson(value: unknown): unknown {
     if (Array.isArray(value)) return value.map(sortedJson)
     if (value !== null && typeof value === 'object') {
       return Object.fromEntries(
         Object.keys(value as Record<string, unknown>)
-          .sort()
+          .sort(utf8Compare)
           .map((k) => [k, sortedJson((value as Record<string, unknown>)[k])]),
       )
     }

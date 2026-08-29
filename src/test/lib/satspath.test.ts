@@ -1,8 +1,12 @@
+import createFetchMock from 'vitest-fetch-mock'
 import { describe, expect, it, vi } from 'vitest'
 import * as resolvers from '@satspath/resolvers'
 import type { SignedPaymentProfile, PaymentProfile } from '@satspath/resolvers'
 import { schnorr } from '@noble/curves/secp256k1.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
+
+const fetchMocker = createFetchMock(vi)
+fetchMocker.enableMocks()
 import {
   isSatsPathIdentifier,
   resolveSatsPathProfile,
@@ -262,8 +266,27 @@ describe('SatsPath Multi-Rail Lib', () => {
   })
 
   describe('getFeeEstimate', () => {
-    it('returns fee estimate correctly', async () => {
-      const fees = await getFeeEstimate()
+    it('returns mocked fee estimate on success', async () => {
+      fetchMocker.mockResponseOnce(
+        JSON.stringify({
+          fastestFee: 30,
+          halfHourFee: 20,
+          hourFee: 15,
+          economyFee: 10,
+          minimumFee: 5,
+        }),
+      )
+      const fees = await getFeeEstimate(true)
+      expect(fees).toBeDefined()
+      expect(fees.fastest_fee).toBe(30)
+      expect(fees.half_hour_fee).toBe(20)
+      expect(fees.hour_fee).toBe(15)
+      expect(fees.minimum_fee).toBe(5)
+    })
+
+    it('falls back to FALLBACK_FEES on network rejection', async () => {
+      fetchMocker.mockRejectOnce(new Error('Network error'))
+      const fees = await getFeeEstimate(true)
       expect(fees).toBeDefined()
       expect(typeof fees.fastest_fee).toBe('number')
       expect(typeof fees.half_hour_fee).toBe('number')

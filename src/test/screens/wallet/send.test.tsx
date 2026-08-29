@@ -96,9 +96,14 @@ describe('Send screen', () => {
     })
 
     await waitFor(() => expect(setSendInfo).toHaveBeenCalled())
-    const clearUpdate = setSendInfo.mock.calls.find(([update]) => typeof update === 'function')?.[0]
+    const clearUpdate = setSendInfo.mock.calls.find(([update]) => {
+      if (typeof update !== 'function') return false
+      const res = update(staleSendInfo)
+      return res.address === undefined && res.arkAddress === undefined && res.lnUrl === undefined
+    })?.[0]
     expect(clearUpdate).toBeTypeOf('function')
-    expect(clearUpdate(staleSendInfo)).toMatchObject({
+    expect(clearUpdate(staleSendInfo)).toEqual({
+      ...staleSendInfo,
       address: undefined,
       arkAddress: undefined,
       lnUrl: undefined,
