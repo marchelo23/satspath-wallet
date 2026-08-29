@@ -353,6 +353,10 @@ export default function SendForm() {
     // in-flight async resolution (resolveSatsPathProfile) that completes
     // after the effect re-runs is silently discarded and does not overwrite
     // state that a newer parse has already written.
+    // Reset amount read-only state at the start of each parse run so that
+    // transitioning away from an invoice recipient (which locks the amount)
+    // to an address, Ark, or SatsPath recipient unlocks it again.
+    setAmountIsReadOnly(false)
     let cancelled = false
     const parseRecipient = async () => {
       if (!recipient) {
@@ -500,19 +504,16 @@ export default function SendForm() {
           if (cancelled) return
           if (profile && verifySatsPathProfileSignature(profile)) {
             setSatsPathProfile(profile)
-            const arkMethod = profile.profile.methods.find((m) => m.type === 'Ark') as any
-            const lnMethod = profile.profile.methods.find((m) => m.type === 'Lightning') as any
-            const onchainMethod = profile.profile.methods.find((m) => m.type === 'Onchain') as any
-
-            const defaultArkAddr = arkMethod?.pubkey || arkMethod?.server
-            const defaultLn = lnMethod?.lightning_address || lnMethod?.lnurl
-            const defaultBtc = onchainMethod?.address
-
+            // Do not pre-populate all destination fields at once: the routing
+            // analysis effect will fire next and call handleSelectRail with the
+            // recommended rail, writing exactly one destination field to sendInfo.
+            // Pre-populating all three would leave multiple active destinations
+            // visible to handleContinue before the user picks a rail.
             setSendInfo((prev) => ({
               ...prev,
-              arkAddress: defaultArkAddr,
-              lnUrl: defaultLn,
-              address: defaultBtc,
+              arkAddress: undefined,
+              lnUrl: undefined,
+              address: undefined,
               invoice: undefined,
               pendingLnSend: undefined,
               recipient,
@@ -572,7 +573,11 @@ export default function SendForm() {
       analyzeSatsPathRoutes(satsPathProfile, currentSats, urgency, recipient).then((analysis) => {
         if (cancelled) return
         setSatsPathAnalysis(analysis)
-        setSelectedRail(analysis.recommendedRail)
+        // Apply the recommended rail immediately so sendInfo contains only the
+        // single destination for that rail. handleSelectRail already handles
+        // clearing the other fields, so this keeps the state consistent without
+        // requiring a manual UI selection.
+        handleSelectRail(analysis.recommendedRail)
       })
     } else if (sendInfo.address || sendInfo.arkAddress || sendInfo.lnUrl || sendInfo.invoice) {
       const methods: any[] = []
@@ -623,12 +628,26 @@ export default function SendForm() {
     if (rail === 'Ark') {
       const m = methods.find((m) => m.type === 'Ark') as any
       if (m?.pubkey || m?.server) {
-        setSendInfo((prev) => ({ ...prev, arkAddress: m.pubkey || m.server, invoice: undefined }))
+        setSendInfo((prev) => ({
+          ...prev,
+          arkAddress: m.pubkey || m.server,
+          lnUrl: undefined,
+          address: undefined,
+          invoice: undefined,
+          pendingLnSend: undefined,
+        }))
       }
     } else if (rail === 'Lightning') {
       const m = methods.find((m) => m.type === 'Lightning') as any
       if (m?.lightning_address || m?.lnurl) {
-        setSendInfo((prev) => ({ ...prev, lnUrl: m.lightning_address || m.lnurl, arkAddress: undefined }))
+        setSendInfo((prev) => ({
+          ...prev,
+          lnUrl: m.lightning_address || m.lnurl,
+          arkAddress: undefined,
+          address: undefined,
+          invoice: undefined,
+          pendingLnSend: undefined,
+        }))
       }
     } else if (rail === 'Onchain') {
       const m = methods.find((m) => m.type === 'Onchain') as any
@@ -639,6 +658,7 @@ export default function SendForm() {
           arkAddress: undefined,
           lnUrl: undefined,
           invoice: undefined,
+          pendingLnSend: undefined,
         }))
       }
     }
