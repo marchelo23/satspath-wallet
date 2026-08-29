@@ -80,6 +80,7 @@ describe('lnurl utilities', () => {
     })
 
     it('rejects prohibited targets during checkLnUrlConditions', async () => {
+      await expect(checkLnUrlConditions('user@test.localhost')).rejects.toThrow(/Insecure or prohibited LNURL endpoint/)
       await expect(checkLnUrlConditions('user@localhost')).rejects.toThrow(/Insecure or prohibited LNURL endpoint/)
     })
   })

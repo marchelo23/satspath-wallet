@@ -131,6 +131,9 @@ export const getCallbackUrl = (lnurl: string): string => {
 
 export const checkLnUrlConditions = (lnurl: string): Promise<LnUrlResponse> => {
   return new Promise<LnUrlResponse>((resolve, reject) => {
+    if (!isValidLnUrl(lnurl)) {
+      return reject(new Error('Insecure or prohibited LNURL endpoint'))
+    }
     let url: string
     try {
       url = getCallbackUrl(lnurl)
@@ -154,6 +157,9 @@ export const checkLnUrlConditions = (lnurl: string): Promise<LnUrlResponse> => {
 
 export const fetchInvoice = (lnurl: string, sats: number, note: string): Promise<string> => {
   return new Promise<string>((resolve, reject) => {
+    if (!isValidLnUrl(lnurl)) {
+      return reject(new Error('Insecure or prohibited LNURL endpoint'))
+    }
     let url: string
     try {
       url = getCallbackUrl(lnurl)
@@ -180,6 +186,9 @@ export const fetchInvoice = (lnurl: string, sats: number, note: string): Promise
 
 export const fetchArkAddress = (lnurl: string): Promise<ArkMethodResponse> => {
   return new Promise<ArkMethodResponse>((resolve, reject) => {
+    if (!isValidLnUrl(lnurl)) {
+      return reject(new Error('Insecure or prohibited LNURL endpoint'))
+    }
     let url: string
     try {
       url = getCallbackUrl(lnurl)
