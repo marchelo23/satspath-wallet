@@ -11,6 +11,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      '@satspath/resolvers': path.resolve(__dirname, './packages/resolvers/src/index.ts'),
+      '@satspath/router': path.resolve(__dirname, './packages/router/src/index.ts'),
     },
   },
   plugins: [

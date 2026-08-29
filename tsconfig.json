@@ -16,7 +16,9 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@satspath/resolvers": ["./packages/resolvers/src/index.ts"],
+      "@satspath/router": ["./packages/router/src/index.ts"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx"]
