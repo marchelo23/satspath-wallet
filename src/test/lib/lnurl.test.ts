@@ -76,6 +76,12 @@ describe('lnurl utilities', () => {
       expect(isSafeLnUrlEndpoint('https://172.31.255.255/lnurlp')).toBe(false)
       expect(isSafeLnUrlEndpoint('https://169.254.169.254/lnurlp')).toBe(false)
       expect(isSafeLnUrlEndpoint('https://[::1]/lnurlp')).toBe(false)
+      expect(isSafeLnUrlEndpoint('https://[::ffff:127.0.0.1]/lnurlp')).toBe(false)
+      expect(isSafeLnUrlEndpoint('https://[::ffff:10.0.0.1]/lnurlp')).toBe(false)
+      expect(isSafeLnUrlEndpoint('https://[fe80::1]/lnurlp')).toBe(false)
+      expect(isSafeLnUrlEndpoint('https://[fe90::1]/lnurlp')).toBe(false)
+      expect(isSafeLnUrlEndpoint('https://[febf::1]/lnurlp')).toBe(false)
+      expect(isSafeLnUrlEndpoint('https://[fd00::1]/lnurlp')).toBe(false)
       expect(isSafeLnUrl('user@127.0.0.1')).toBe(false)
     })
 

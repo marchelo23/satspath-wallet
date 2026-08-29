@@ -43,7 +43,7 @@ const checkLnUrlResponse = (amount: number, data: LnUrlResponse) => {
 const fetchLnUrlInvoice = async (amount: number, note: string, data: LnUrlResponse) => {
   let url = `${data.callback}?amount=${amount}`
   if (note) url += `&comment=${note}`
-  const res = await fetch(url).then(checkResponse<LnUrlCallbackResponse>)
+  const res = await fetch(url, { redirect: 'error' }).then(checkResponse<LnUrlCallbackResponse>)
   return res.pr
 }
 
@@ -74,7 +74,7 @@ export const isSafeLnUrlEndpoint = (rawUrl: string): boolean => {
   try {
     const parsed = new URL(rawUrl)
     if (parsed.protocol !== 'https:') return false
-    const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+    let hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '')
     if (
       !hostname ||
       hostname === 'localhost' ||
@@ -83,17 +83,36 @@ export const isSafeLnUrlEndpoint = (rawUrl: string): boolean => {
       hostname.endsWith('.internal') ||
       hostname === '0.0.0.0' ||
       hostname === '::' ||
-      hostname === '::1' ||
+      hostname === '::1'
+    ) {
+      return false
+    }
+
+    // Handle IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1)
+    if (hostname.startsWith('::ffff:')) {
+      hostname = hostname.slice(7)
+    }
+
+    if (
       hostname.startsWith('127.') ||
       hostname.startsWith('10.') ||
       hostname.startsWith('192.168.') ||
       hostname.startsWith('169.254.') ||
+      hostname.startsWith('0.')
+    ) {
+      return false
+    }
+
+    // Check IPv6 link-local (fe80::/10 includes fe80-febf) and unique-local (fc00::/7)
+    if (
+      /^fe[89ab][0-9a-f]:/i.test(hostname) ||
       hostname.startsWith('fe80:') ||
       hostname.startsWith('fc') ||
       hostname.startsWith('fd')
     ) {
       return false
     }
+
     const match172 = hostname.match(/^172\.(\d+)\./)
     if (match172) {
       const secondOctet = parseInt(match172[1], 10)
@@ -143,7 +162,7 @@ export const checkLnUrlConditions = (lnurl: string): Promise<LnUrlResponse> => {
     if (!isSafeLnUrlEndpoint(url)) {
       return reject(new Error('Insecure or prohibited LNURL endpoint'))
     }
-    fetch(url)
+    fetch(url, { redirect: 'error' })
       .then(checkResponse<LnUrlResponse>)
       .then((data) => {
         if (data.callback && !isSafeLnUrlEndpoint(data.callback)) {
@@ -170,7 +189,7 @@ export const fetchInvoice = (lnurl: string, sats: number, note: string): Promise
       return reject(new Error('Insecure or prohibited LNURL endpoint'))
     }
     const amount = Math.round(sats * 1000) // millisatoshis
-    fetch(url)
+    fetch(url, { redirect: 'error' })
       .then(checkResponse<LnUrlResponse>)
       .then((data) => {
         if (data.callback && !isSafeLnUrlEndpoint(data.callback)) {
@@ -198,7 +217,7 @@ export const fetchArkAddress = (lnurl: string): Promise<ArkMethodResponse> => {
     if (!isSafeLnUrlEndpoint(url)) {
       return reject(new Error('Insecure or prohibited LNURL endpoint'))
     }
-    fetch(url + '?method=ark')
+    fetch(url + '?method=ark', { redirect: 'error' })
       .then(checkResponse<ArkMethodResponse>)
       .then(resolve)
       .catch(reject)

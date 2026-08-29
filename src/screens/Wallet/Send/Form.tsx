@@ -657,6 +657,15 @@ export default function SendForm() {
           invoice: undefined,
           pendingLnSend: undefined,
         }))
+      } else {
+        setSendInfo((prev) => ({
+          ...prev,
+          lnUrl: undefined,
+          arkAddress: undefined,
+          address: undefined,
+          invoice: undefined,
+          pendingLnSend: undefined,
+        }))
       }
     } else if (rail === 'Onchain') {
       const m = methods.find((m) => m.type === 'Onchain') as any
@@ -754,8 +763,14 @@ export default function SendForm() {
   // check lnurl conditions
   useEffect(() => {
     const targetLnUrl = sendInfo.lnUrl
-    if (!targetLnUrl || sendInfo.arkAddress || sendInfo.invoice || !isSafeLnUrl(targetLnUrl)) {
+    if (!targetLnUrl || sendInfo.arkAddress || sendInfo.invoice) {
       setLnUrlResponse(null)
+      return
+    }
+    if (!isSafeLnUrl(targetLnUrl)) {
+      setLnUrlResponse(null)
+      setSendInfo((prev) => ({ ...prev, lnUrl: undefined }))
+      setRecipientError('Insecure or invalid LNURL destination')
       return
     }
     let cancelled = false
