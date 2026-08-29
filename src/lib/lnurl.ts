@@ -88,9 +88,25 @@ export const isSafeLnUrlEndpoint = (rawUrl: string): boolean => {
       return false
     }
 
-    // Handle IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1)
+    // Handle IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1 or ::ffff:7f00:1)
     if (hostname.startsWith('::ffff:')) {
-      hostname = hostname.slice(7)
+      const rest = hostname.slice(7)
+      if (rest.includes('.')) {
+        hostname = rest
+      } else {
+        const parts = rest.split(':')
+        if (parts.length === 2) {
+          const high = parseInt(parts[0], 16)
+          const low = parseInt(parts[1], 16)
+          const b1 = (high >> 8) & 0xff
+          const b2 = high & 0xff
+          const b3 = (low >> 8) & 0xff
+          const b4 = low & 0xff
+          hostname = `${b1}.${b2}.${b3}.${b4}`
+        } else {
+          return false
+        }
+      }
     }
 
     if (
