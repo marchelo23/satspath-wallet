@@ -183,6 +183,7 @@ export default function SendForm() {
   const [satsPathLoading, setSatsPathLoading] = useState(false)
 
   const timeoutRef = useRef<NodeJS.Timeout>()
+  const recipientParseStartedRef = useRef(false)
 
   const prefersReducedMotion = useReducedMotion()
   const accountAsset = useMemo<AssetOption | null>(
@@ -328,11 +329,26 @@ export default function SendForm() {
   // selects an asset and the address is not compatible with it)
   useEffect(() => {
     const isSatsPathRecipient = isSatsPathIdentifier(recipient)
+    const clearRecipientResolution = () => {
+      setSatsPathProfile(null)
+      setSatsPathAnalysis(null)
+      setSendInfo((prev) => ({
+        ...prev,
+        address: undefined,
+        arkAddress: undefined,
+        lnUrl: undefined,
+        invoice: undefined,
+        pendingLnSend: undefined,
+      }))
+    }
     if (!readyToParse) {
+      if (recipient || recipientParseStartedRef.current) clearRecipientResolution()
       if (!isSatsPathRecipient) setSatsPathLoading(false)
       return
     }
+    recipientParseStartedRef.current = true
     setRecipientError('')
+    clearRecipientResolution()
     // Cancellation flag: set to true by the cleanup function so that any
     // in-flight async resolution (resolveSatsPathProfile) that completes
     // after the effect re-runs is silently discarded and does not overwrite
@@ -341,6 +357,7 @@ export default function SendForm() {
     const parseRecipient = async () => {
       if (!recipient) {
         setSatsPathLoading(false)
+        setReadyToParse(false)
         return
       }
       const lowerCaseData = recipient.toLowerCase().replace(/^lightning:/, '')
@@ -351,7 +368,11 @@ export default function SendForm() {
       }
       if (isBip21(lowerCaseData)) {
         const { address, arkAddress, invoice, lnUrl, satoshis, assetId, assetAmount } = decodeBip21(recipient.trim())
-        if (!address && !arkAddress && !invoice && !lnUrl) return setRecipientError('Unable to parse bip21')
+        if (!address && !arkAddress && !invoice && !lnUrl) {
+          setRecipientError('Unable to parse bip21')
+          setReadyToParse(false)
+          return
+        }
         if (assetId) {
           let found = assetOptions.find((a) => a.assetId === assetId)
           if (!found) {
@@ -385,7 +406,7 @@ export default function SendForm() {
             recipient,
             satoshis: 0,
             assets: [{ assetId, amount: rawAmount }],
-            pendingLnSend: invoice === prev.invoice ? prev.pendingLnSend : undefined,
+            pendingLnSend: undefined,
           }))
         }
         setSendInfo((prev) => ({
@@ -398,17 +419,26 @@ export default function SendForm() {
           lnUrl,
           recipient,
           satoshis: satoshis ?? prev.satoshis,
-          pendingLnSend: invoice === prev.invoice ? prev.pendingLnSend : undefined,
+          pendingLnSend: undefined,
         }))
         if (satoshis) setAmountTextValue(getTextValue(satoshis))
         return
       }
       if (isValidArkAddress(lowerCaseData)) {
-        return setSendInfo((prev) => ({ ...prev, arkAddress: lowerCaseData, pendingLnSend: undefined }))
+        return setSendInfo((prev) => ({
+          ...prev,
+          address: undefined,
+          arkAddress: lowerCaseData,
+          lnUrl: undefined,
+          invoice: undefined,
+          pendingLnSend: undefined,
+        }))
       }
       if (isLightningInvoice(lowerCaseData)) {
         if (isAssetSend) {
-          return setRecipientError('Assets can only be sent to Arkade addresses')
+          setRecipientError('Assets can only be sent to Arkade addresses')
+          setReadyToParse(false)
+          return
         }
         // Amount from the wallet's own decoder; expiry and chain are re-checked
         // by the RFQ client before any solver sees the invoice.
@@ -416,14 +446,23 @@ export default function SendForm() {
         try {
           satoshis = decodeInvoice(lowerCaseData).amountSats
         } catch {
-          return setRecipientError('Unable to decode invoice')
+          setRecipientError('Unable to decode invoice')
+          setReadyToParse(false)
+          return
         }
-        if (!satoshis) return setRecipientError('Invoice must have amount defined')
+        if (!satoshis) {
+          setRecipientError('Invoice must have amount defined')
+          setReadyToParse(false)
+          return
+        }
         setSendInfo((prev) => ({
           ...prev,
+          address: undefined,
+          arkAddress: undefined,
+          lnUrl: undefined,
           invoice: lowerCaseData,
           satoshis,
-          pendingLnSend: lowerCaseData === prev.invoice ? prev.pendingLnSend : undefined,
+          pendingLnSend: undefined,
         }))
         setAmountTextValue(getTextValue(satoshis))
         setAmountIsReadOnly(true)
@@ -431,9 +470,18 @@ export default function SendForm() {
       }
       if (isBTCAddress(recipient)) {
         if (isAssetSend) {
-          return setRecipientError('Assets can only be sent to Arkade addresses')
+          setRecipientError('Assets can only be sent to Arkade addresses')
+          setReadyToParse(false)
+          return
         }
-        return setSendInfo({ ...sendInfo, address: recipient })
+        return setSendInfo((prev) => ({
+          ...prev,
+          address: recipient,
+          arkAddress: undefined,
+          lnUrl: undefined,
+          invoice: undefined,
+          pendingLnSend: undefined,
+        }))
       }
       if (isArkNote(lowerCaseData)) {
         try {
@@ -462,9 +510,11 @@ export default function SendForm() {
 
             setSendInfo((prev) => ({
               ...prev,
-              arkAddress: defaultArkAddr || prev.arkAddress,
-              lnUrl: defaultLn || prev.lnUrl,
-              address: defaultBtc || prev.address,
+              arkAddress: defaultArkAddr,
+              lnUrl: defaultLn,
+              address: defaultBtc,
+              invoice: undefined,
+              pendingLnSend: undefined,
               recipient,
             }))
             setSatsPathLoading(false)
@@ -473,16 +523,7 @@ export default function SendForm() {
             // Signature check failed — fail closed: clear all derived state and
             // block form submission so stale destination fields cannot be used.
             consoleError(new Error('SatsPath profile signature verification failed'), 'Invalid profile signature')
-            setSatsPathProfile(null)
-            setSatsPathAnalysis(null)
-            setSendInfo((prev) => ({
-              ...prev,
-              arkAddress: undefined,
-              lnUrl: undefined,
-              address: undefined,
-              invoice: undefined,
-              pendingLnSend: undefined,
-            }))
+            clearRecipientResolution()
             setRecipientError('SatsPath profile signature is invalid')
             setSatsPathLoading(false)
             setReadyToParse(false)
@@ -491,11 +532,24 @@ export default function SendForm() {
         } catch (err) {
           if (cancelled) return
           consoleError(err, 'SatsPath alias resolve error')
+          clearRecipientResolution()
+          setRecipientError('Invalid recipient address')
+          setSatsPathLoading(false)
+          setReadyToParse(false)
+          return
         }
+        clearRecipientResolution()
         setSatsPathLoading(false)
       }
       if (isValidLnUrl(lowerCaseData)) {
-        return setSendInfo({ ...sendInfo, lnUrl: lowerCaseData })
+        return setSendInfo((prev) => ({
+          ...prev,
+          address: undefined,
+          arkAddress: undefined,
+          lnUrl: lowerCaseData,
+          invoice: undefined,
+          pendingLnSend: undefined,
+        }))
       }
       setRecipientError('Invalid recipient address')
       setReadyToParse(false)
@@ -512,9 +566,11 @@ export default function SendForm() {
       setSatsPathAnalysis(null)
       return
     }
+    let cancelled = false
     const currentSats = sendInfo.satoshis || 1000
     if (satsPathProfile) {
       analyzeSatsPathRoutes(satsPathProfile, currentSats, urgency, recipient).then((analysis) => {
+        if (cancelled) return
         setSatsPathAnalysis(analysis)
         setSelectedRail(analysis.recommendedRail)
       })
@@ -535,6 +591,7 @@ export default function SendForm() {
 
       if (methods.length > 1) {
         analyzeSatsPathRoutes(methods, currentSats, urgency, recipient || 'Recipient').then((analysis) => {
+          if (cancelled) return
           setSatsPathAnalysis(analysis)
         })
       } else {
@@ -542,6 +599,9 @@ export default function SendForm() {
       }
     } else {
       setSatsPathAnalysis(null)
+    }
+    return () => {
+      cancelled = true
     }
   }, [
     satsPathProfile,
@@ -1032,6 +1092,8 @@ export default function SendForm() {
       Boolean(error) ||
       processing
     : !((address || arkAddress || lnUrl || invoice) && satoshis && satoshis > 0) ||
+      !readyToParse ||
+      Boolean(recipientError) ||
       (lnUrlResponse?.maxSendable && satoshis > lnUrlResponse.maxSendable) ||
       (lnUrlResponse?.minSendable && satoshis < lnUrlResponse.minSendable) ||
       amountIsAboveMaxLimit(satoshis) ||

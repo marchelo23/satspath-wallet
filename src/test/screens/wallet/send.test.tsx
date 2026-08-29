@@ -64,6 +64,48 @@ describe('Send screen', () => {
     expect(screen.getByText('Recipient address')).toBeInTheDocument()
     expect(screen.getByText('Continue')).toBeInTheDocument()
   })
+  it('clears stale destinations and disables submit when the recipient changes', async () => {
+    const pendingLnSend = { invoice: 'stale-invoice' } as any
+    const staleSendInfo = {
+      ...emptySendInfo,
+      address: 'stale-address',
+      arkAddress: 'stale-ark-address',
+      lnUrl: 'stale-lnurl',
+      invoice: 'stale-invoice',
+      pendingLnSend,
+      satoshis: 1_000,
+    }
+    const setSendInfo = vi.fn()
+    renderSendForm({
+      flowContext: { ...mockFlowContextValue, sendInfo: staleSendInfo, setSendInfo },
+      walletContext: {
+        ...mockWalletContextValue,
+        availableBalance: 10_000,
+        balance: 10_000,
+        svcWallet: {
+          ...mockSvcWallet,
+          getAddress: () => new Promise<string>(() => {}),
+          getBoardingAddress: () => new Promise<string>(() => {}),
+        } as any,
+      },
+    })
+
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled()
+    fireEvent.change(document.querySelector('input[name="send-address"]')!, {
+      target: { value: 'alice@example.com' },
+    })
+
+    await waitFor(() => expect(setSendInfo).toHaveBeenCalled())
+    const clearUpdate = setSendInfo.mock.calls.find(([update]) => typeof update === 'function')?.[0]
+    expect(clearUpdate).toBeTypeOf('function')
+    expect(clearUpdate(staleSendInfo)).toMatchObject({
+      address: undefined,
+      arkAddress: undefined,
+      lnUrl: undefined,
+      invoice: undefined,
+      pendingLnSend: undefined,
+    })
+  })
   it('fills the amount field when an LNURL resolves to a fixed amount', async () => {
     // regression: a fixed-amount LNURL (minSendable === maxSendable) must
     // populate the read-only amount input instead of leaving it blank
