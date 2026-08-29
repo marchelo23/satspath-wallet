@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import * as resolvers from '@satspath/resolvers'
 import type { SignedPaymentProfile, PaymentProfile } from '@satspath/resolvers'
 import { schnorr } from '@noble/curves/secp256k1.js'
-import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
 import {
   isSatsPathIdentifier,
