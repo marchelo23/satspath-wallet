@@ -1,0 +1,73 @@
+import { useContext, useEffect, useState } from 'react'
+import { FlowContext } from '../../providers/flow'
+import Content from '../../components/Content'
+import { WalletContext } from '../../providers/wallet'
+import LoadingLogo from '../../components/LoadingLogo'
+import Header from '../../components/Header'
+import { setPrivateKey } from '../../lib/privateKey'
+import { setMnemonic } from '../../lib/mnemonic'
+import { consoleError } from '../../lib/logs'
+import { useLoadingStatus } from '../../hooks/useLoadingStatus'
+import { setLoadingStatus } from '../../lib/loadingStatus'
+import { NavigationContext, Pages } from '../../providers/navigation'
+
+export default function InitConnect() {
+  const { initInfo, setInitInfo } = useContext(FlowContext)
+  const { navigate } = useContext(NavigationContext)
+  const { initWallet } = useContext(WalletContext)
+
+  const loadingStatus = useLoadingStatus()
+  const [error, setError] = useState<string>()
+  const [initialized, setInitialized] = useState(false)
+  const [connectDone, setConnectDone] = useState(false)
+
+  const { password, privateKey, mnemonic, walletMode } = initInfo
+
+  useEffect(() => {
+    if (!password || (!mnemonic && !privateKey)) {
+      abortConnectionWithError(new Error('Missing credentials'))
+      return
+    }
+    if (mnemonic) {
+      setMnemonic(mnemonic, password)
+        .then(() => initWallet({ mnemonic, walletMode, restoring: initInfo.restoring }))
+        .then(() => setInitialized(true))
+        .catch(abortConnectionWithError)
+    } else if (privateKey) {
+      setPrivateKey(privateKey, password)
+        .then(() => initWallet({ privateKey }))
+        .then(() => setInitialized(true))
+        .catch(abortConnectionWithError)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (initialized) setConnectDone(true)
+  }, [initialized])
+
+  const handleExitComplete = () => {
+    setInitInfo({ ...initInfo, password: undefined, privateKey: undefined, mnemonic: undefined, walletMode: undefined })
+    navigate(error ? Pages.Init : Pages.Wallet)
+  }
+
+  const abortConnectionWithError = (err: any) => {
+    consoleError(err, 'Error during connection:')
+    setLoadingStatus('Connection failed')
+    setError('Connection failed')
+    setConnectDone(true)
+  }
+
+  return (
+    <>
+      <Header text='Connecting to server' />
+      <Content>
+        <LoadingLogo
+          text={loadingStatus || 'Connecting to server'}
+          exitMode={connectDone ? 'fly-up' : 'none'}
+          onExitComplete={handleExitComplete}
+          done={connectDone}
+        />
+      </Content>
+    </>
+  )
+}

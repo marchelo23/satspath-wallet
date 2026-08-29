@@ -1,0 +1,227 @@
+import { emptyAspInfo } from '../../lib/asp'
+import { Pages } from '../../providers/navigation'
+import { emptyInitInfo, emptyNoteInfo, emptyRecvInfo, emptySendInfo } from '../../providers/flow'
+import { AspInfo } from '../../providers/asp'
+import { SingleKey, IVtxoManager } from '@arkade-os/sdk'
+import { Currencies, SettingsOptions, Themes, Unit } from '../../lib/types'
+import { AssetIconApprovalManager } from '../../lib/assetIconApproval'
+
+const mockAspInfo: AspInfo = {
+  ...emptyAspInfo,
+  boardingExitDelay: BigInt(1024),
+  checkpointTapscript: '',
+  dust: BigInt(333),
+  network: 'regtest',
+  url: 'http://asp.local',
+  signerPubkey: 'mock_signer_pubkey',
+  forfeitAddress: 'mock_forfeit_address',
+  sessionDuration: BigInt(1024 * 60 * 17), // 17 minutes
+  unilateralExitDelay: BigInt(2048),
+}
+
+export const mockTxId = '547b9e710c0b57197ab27faa2192601defe2efb08a45ee8ada765a6829ba451b'
+
+export const mockTxInfo = {
+  amount: 100000,
+  boardingTxid: mockTxId,
+  redeemTxid: '',
+  roundTxid: '',
+  createdAt: Math.floor(Date.now() / 1000) - 21, // 21 seconds ago
+  explorable: mockTxId,
+  preconfirmed: false,
+  settled: true,
+  type: 'received',
+}
+
+export const mockIssuanceTxInfo = {
+  amount: 0,
+  assets: [{ assetId: 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd', amount: BigInt(10_000) }],
+  boardingTxid: '',
+  redeemTxid: mockTxId,
+  roundTxid: '',
+  createdAt: Math.floor(Date.now() / 1000) - 60,
+  explorable: mockTxId,
+  preconfirmed: false,
+  settled: true,
+  type: 'sent',
+}
+
+export const mockAspContextValue = {
+  aspInfo: mockAspInfo,
+  calcBestMarketHour: () => undefined,
+  calcNextMarketHour: () => undefined,
+  setAspInfo: () => {},
+}
+
+export const mockConfigContextValue = {
+  config: {
+    announcementsSeen: [],
+    apps: { assets: { enabled: true } },
+    aspUrl: 'http://asp.local',
+    dismissedBanners: [],
+    delegate: import.meta.env.VITE_DELEGATE_ENABLED !== 'false',
+    currency: Currencies.EUR,
+    importedAssets: [],
+    haptics: true,
+    nostrBackup: true,
+    notifications: true,
+    pubkey: '',
+    showBalance: true,
+    theme: Themes.Dark,
+    unit: Unit.BTC,
+    walletMode: 'static' as const,
+  },
+  updateConfig: () => {},
+  effectiveTheme: Themes.Dark as const,
+  systemTheme: Themes.Dark as const,
+  useFiat: true,
+  backupConfig: () => Promise.resolve(),
+  configLoaded: true,
+  showConfig: false,
+  toggleShowConfig: () => {},
+}
+
+export const mockDevModeContextValue = {
+  devMode: false,
+  handleTap: () => {},
+}
+
+export const mockFiatContextValue = {
+  toFiat: (satoshis?: number) => satoshis ?? 0,
+  fromFiat: (fiat?: number) => fiat ?? 0,
+  updateFiatPrices: () => {},
+  fiatDecimals: () => 2,
+  fromFiatAmount: (amount: number) => amount,
+  toFiatAmount: (amount: number) => amount,
+}
+
+export const mockOptionsContextValue = {
+  direction: 'forward' as const,
+  option: SettingsOptions.Menu,
+  options: [],
+  goBack: () => {},
+  setOption: () => {},
+  validOptions: () => [],
+}
+
+export const mockNavigationContextValue = {
+  direction: 'none' as const,
+  goBack: () => {},
+  isInitialLoad: false,
+  navigate: () => {},
+  replace: () => {},
+  screen: Pages.Init,
+}
+
+export const mockWalletContextValue = {
+  authState: 'authenticated' as const,
+  initWallet: () => Promise.resolve(),
+  lockWallet: () => Promise.resolve(),
+  resetWallet: () => Promise.resolve(),
+  settlePreconfirmed: () => Promise.resolve(),
+  unlockWallet: () => Promise.resolve(),
+  updateWallet: () => {},
+  reloadWallet: () => Promise.resolve(),
+  restartWallet: () => Promise.resolve(),
+  vtxoManager: {} as IVtxoManager,
+  wallet: {
+    nextRollover: 0,
+  },
+  walletLoaded: false,
+  svcWallet: undefined,
+  isLocked: () => Promise.resolve(true),
+  balance: 0,
+  availableBalance: 0,
+  assetBalances: [],
+  availableAssetBalances: [],
+  assetMetadataCache: new Map(),
+  setCacheEntry: () => ({ cachedAt: 0 }) as any,
+  txs: [mockTxInfo],
+  vtxos: { spendable: [], spent: [] },
+  iconApprovalManager: new AssetIconApprovalManager(),
+  isVerifiedAsset: () => false,
+  dataReady: false,
+  loadError: null,
+  dismissLoadError: () => {},
+  setAssetSwaps: () => {},
+}
+
+export const mockFlowContextValue = {
+  txInfo: mockTxInfo,
+  swapInfo: undefined,
+  swapFromAssetId: undefined,
+  initInfo: emptyInitInfo,
+  noteInfo: emptyNoteInfo,
+  recvInfo: emptyRecvInfo,
+  sendInfo: emptySendInfo,
+  setInitInfo: () => {},
+  setNoteInfo: () => {},
+  setRecvInfo: () => {},
+  setSendInfo: () => {},
+  setSwapInfo: () => {},
+  setSwapFromAssetId: () => {},
+  setTxInfo: () => {},
+  assetInfo: { assetId: '', supply: BigInt(0) },
+  setAssetInfo: () => {},
+  deepLinkInfo: undefined,
+  setDeepLinkInfo: () => {},
+}
+
+export const mockLimitsContextValue = {
+  amountIsAboveMaxLimit: () => false,
+  amountIsBelowMinLimit: () => false,
+  utxoTxsAllowed: () => true,
+  vtxoTxsAllowed: () => true,
+}
+
+export const mockSvcWallet = {
+  identity: SingleKey.fromRandomBytes(),
+  getAddress: () => '',
+  getBoardingAddress: () => Promise.resolve(''),
+  getBalance: () => Promise.resolve({}),
+  getVtxos: () => Promise.resolve([]),
+  getBoardingUtxos: () => Promise.resolve([]),
+  getTransactionHistory: () => Promise.resolve([]),
+  sendBitcoin: () => Promise.resolve(''),
+  settle: () => Promise.resolve(''),
+  walletRepository: {
+    getVtxos: () => Promise.resolve([]),
+    saveVtxos: () => Promise.resolve(),
+    removeVtxo: () => Promise.resolve(),
+    clearVtxos: () => Promise.resolve(),
+    getUtxos: () => Promise.resolve([]),
+    saveUtxos: () => Promise.resolve(),
+    removeUtxo: () => Promise.resolve(),
+    clearUtxos: () => Promise.resolve(),
+    getTransactions: () => Promise.resolve([]),
+    saveTransaction: () => Promise.resolve(),
+    clearTransactions: () => Promise.resolve(),
+    getTransactionHistory: () => Promise.resolve([]),
+    saveTransactions: () => Promise.resolve(),
+    getWalletState: () => Promise.resolve(null),
+    saveWalletState: () => Promise.resolve(),
+  },
+  contractRepository: {
+    getContractData: () => Promise.resolve(null),
+    setContractData: () => Promise.resolve(),
+    clearContractData: () => Promise.resolve(),
+    deleteContractData: () => Promise.resolve(),
+    getContractCollection: () => Promise.resolve([]),
+    saveToContractCollection: () => Promise.resolve(),
+    removeFromContractCollection: () => Promise.resolve(),
+  },
+  sendMessage: undefined,
+  serviceWorker: {
+    onstatechange: () => {},
+    scriptURL: '',
+    state: 'installing' as ServiceWorkerState,
+    postMessage: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => true,
+    onerror: () => {},
+  },
+  clear: undefined,
+  getStatus: undefined,
+  reload: undefined,
+}
