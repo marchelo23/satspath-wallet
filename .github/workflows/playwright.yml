@@ -5,6 +5,11 @@ on:
     branches: [main, master, next]
   pull_request:
     branches: [main, master, next]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
+
 jobs:
   test:
     name: E2E (${{ matrix.group }} / ${{ matrix.project }})

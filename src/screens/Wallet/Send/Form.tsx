@@ -63,6 +63,7 @@ import UnverifiedBadge from '../../../components/UnverifiedBadge'
 import {
   isSatsPathIdentifier,
   resolveSatsPathProfile,
+  verifySatsPathProfileSignature,
   analyzeSatsPathRoutes,
   type SatsPathMultiRailAnalysis,
 } from '../../../lib/satspath'
@@ -434,7 +435,7 @@ export default function SendForm() {
         setSatsPathLoading(true)
         try {
           const profile = await resolveSatsPathProfile(recipient)
-          if (profile) {
+          if (profile && verifySatsPathProfileSignature(profile)) {
             setSatsPathProfile(profile)
             const arkMethod = profile.profile.methods.find((m) => m.type === 'Ark') as any
             const lnMethod = profile.profile.methods.find((m) => m.type === 'Lightning') as any
@@ -453,6 +454,8 @@ export default function SendForm() {
             }))
             setSatsPathLoading(false)
             return
+          } else if (profile) {
+            consoleError(new Error('SatsPath profile signature verification failed'), 'Invalid profile signature')
           }
         } catch (err) {
           consoleError(err, 'SatsPath alias resolve error')

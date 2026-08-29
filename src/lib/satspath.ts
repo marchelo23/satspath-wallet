@@ -1,6 +1,7 @@
 import {
   resolveAlias,
   SignedPaymentProfile,
+  PaymentProfile,
   TypedPaymentMethod,
   ArkMethod,
   LightningMethod,
@@ -15,6 +16,9 @@ import {
   type FeeEstimate,
   type PaymentUrgency,
 } from '@satspath/router'
+import { schnorr } from '@noble/curves/secp256k1.js'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex } from '@noble/hashes/utils.js'
 import { consoleError } from './logs'
 
 export interface SatsPathRailQuote {
@@ -85,6 +89,50 @@ export async function getFeeEstimate(forceRefresh = false): Promise<FeeEstimate>
 }
 
 /**
+ * Cryptographically verifies a SatsPath profile's Schnorr signature against its identity_pubkey.
+ * The message signed is the SHA-256 hash of the JSON-serialized profile object.
+ */
+export function verifySatsPathProfileSignature(signedProfile: SignedPaymentProfile): boolean {
+  try {
+    if (!signedProfile || !signedProfile.signature || !signedProfile.profile?.identity_pubkey) {
+      return false
+    }
+    const sigHex = signedProfile.signature.trim()
+    if (sigHex.length !== 128) {
+      return false
+    }
+
+    let pubkeyHex = signedProfile.profile.identity_pubkey.trim()
+    // Handle 33-byte compressed pubkey (02/03 prefix) or 32-byte x-only pubkey
+    if (pubkeyHex.length === 66 && (pubkeyHex.startsWith('02') || pubkeyHex.startsWith('03'))) {
+      pubkeyHex = pubkeyHex.slice(2)
+    }
+    if (pubkeyHex.length !== 64) {
+      return false
+    }
+
+    const messageBytes = new TextEncoder().encode(JSON.stringify(signedProfile.profile))
+    const messageHash = sha256(messageBytes)
+    return schnorr.verify(sigHex, messageHash, pubkeyHex)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Signs a payment profile with a 32-byte secp256k1 private key, producing a SignedPaymentProfile.
+ */
+export function signSatsPathProfile(profile: PaymentProfile, privateKey: Uint8Array): SignedPaymentProfile {
+  const messageBytes = new TextEncoder().encode(JSON.stringify(profile))
+  const messageHash = sha256(messageBytes)
+  const signature = bytesToHex(schnorr.sign(messageHash, privateKey))
+  return {
+    profile,
+    signature,
+  }
+}
+
+/**
  * Generates an exhaustive multi-rail routing comparison for a given profile and amount
  */
 export async function analyzeSatsPathRoutes(
@@ -94,9 +142,13 @@ export async function analyzeSatsPathRoutes(
   recipientAlias = 'Recipient',
   customFees?: FeeEstimate,
 ): Promise<SatsPathMultiRailAnalysis> {
-  const methods = Array.isArray(profileOrMethods) ? profileOrMethods : profileOrMethods.profile.methods
-  const signedProfile: SignedPaymentProfile = Array.isArray(profileOrMethods)
-    ? {
+  const isSigned = !Array.isArray(profileOrMethods)
+  const methods = isSigned ? profileOrMethods.profile.methods : profileOrMethods
+  const isVerifiedProfile = isSigned ? verifySatsPathProfileSignature(profileOrMethods) : false
+
+  const signedProfile: SignedPaymentProfile = isSigned
+    ? profileOrMethods
+    : {
         profile: {
           alias: recipientAlias,
           identity_pubkey: '020000000000000000000000000000000000000000000000000000000000000001',
@@ -107,7 +159,6 @@ export async function analyzeSatsPathRoutes(
         },
         signature: '0'.repeat(128),
       }
-    : profileOrMethods
 
   let feeEstimate = customFees || FALLBACK_FEES
   if (!customFees) {
@@ -200,8 +251,8 @@ export async function analyzeSatsPathRoutes(
 
   return {
     recipient: recipientAlias,
-    profile: !Array.isArray(profileOrMethods) ? profileOrMethods : undefined,
-    isVerifiedProfile: !Array.isArray(profileOrMethods) && profileOrMethods.signature.length === 128,
+    profile: isSigned ? profileOrMethods : undefined,
+    isVerifiedProfile,
     recommendedRail: recommendedType as 'Ark' | 'Lightning' | 'Onchain',
     recommendedReason: primaryQuote?.reason || 'Optimal rail selected based on amount and network fees.',
     selectedUrgency: urgency,

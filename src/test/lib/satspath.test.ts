@@ -1,12 +1,18 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import * as resolvers from '@satspath/resolvers'
+import type { SignedPaymentProfile, PaymentProfile } from '@satspath/resolvers'
+import { schnorr } from '@noble/curves/secp256k1.js'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex } from '@noble/hashes/utils.js'
 import {
   isSatsPathIdentifier,
   resolveSatsPathProfile,
   getFeeEstimate,
   analyzeSatsPathRoutes,
   buildSatsPathUnifiedUri,
+  verifySatsPathProfileSignature,
+  signSatsPathProfile,
 } from '../../lib/satspath'
-import type { SignedPaymentProfile } from '@satspath/resolvers'
 
 describe('SatsPath Multi-Rail Lib', () => {
   describe('isSatsPathIdentifier', () => {
@@ -27,9 +33,90 @@ describe('SatsPath Multi-Rail Lib', () => {
   })
 
   describe('resolveSatsPathProfile', () => {
-    it('handles non-existent or unresolvable identifier gracefully', async () => {
+    it('mocks resolveAlias rejection and handles catch-path gracefully', async () => {
+      const resolveSpy = vi.spyOn(resolvers, 'resolveAlias').mockRejectedValueOnce(new Error('Resolver lookup failed'))
+
       const profile = await resolveSatsPathProfile('nonexistent-user-12345@unknown-domain-xyz.local')
       expect(profile).toBeNull()
+      expect(resolveSpy).toHaveBeenCalledWith('nonexistent-user-12345@unknown-domain-xyz.local')
+      resolveSpy.mockRestore()
+    })
+
+    it('returns resolved profile when resolver succeeds', async () => {
+      const mockSignedProfile: SignedPaymentProfile = {
+        profile: {
+          alias: 'alice@domain.com',
+          identity_pubkey: '020000000000000000000000000000000000000000000000000000000000000001',
+          methods: [],
+          updated_at: 1700000000,
+          preferences: [],
+          method_verifications: [],
+        },
+        signature: '0'.repeat(128),
+      }
+      const resolveSpy = vi.spyOn(resolvers, 'resolveAlias').mockResolvedValueOnce(mockSignedProfile)
+
+      const profile = await resolveSatsPathProfile('alice@domain.com')
+      expect(profile).toEqual(mockSignedProfile)
+      expect(resolveSpy).toHaveBeenCalledWith('alice@domain.com')
+      resolveSpy.mockRestore()
+    })
+  })
+
+  describe('verifySatsPathProfileSignature and signSatsPathProfile', () => {
+    const testPrivKey = new Uint8Array(32).fill(9)
+    const testPubKeyHex = bytesToHex(schnorr.getPublicKey(testPrivKey))
+
+    const baseProfile: PaymentProfile = {
+      alias: 'alice@satspath.com',
+      identity_pubkey: testPubKeyHex,
+      methods: [
+        {
+          type: 'Ark',
+          label: 'Ark',
+          server: 'https://ark.satspath.com',
+          pubkey: '020000000000000000000000000000000000000000000000000000000000000002',
+        },
+        {
+          type: 'Lightning',
+          label: 'Lightning',
+          lightning_address: 'alice@satspath.com',
+        },
+        {
+          type: 'Onchain',
+          label: 'Onchain',
+          network: 'mainnet',
+          address: 'bc1qtestaddress999999999999999999999999',
+          address_list: ['bc1qtestaddress999999999999999999999999'],
+        },
+      ],
+      updated_at: 1700000000,
+      preferences: ['Ark', 'Lightning', 'Onchain'],
+      method_verifications: [],
+    }
+
+    it('creates a valid signature that verifies successfully', () => {
+      const signed = signSatsPathProfile(baseProfile, testPrivKey)
+      expect(signed.signature.length).toBe(128)
+      expect(verifySatsPathProfileSignature(signed)).toBe(true)
+    })
+
+    it('rejects tampered profiles or invalid signatures', () => {
+      const signed = signSatsPathProfile(baseProfile, testPrivKey)
+      const tamperedProfile: SignedPaymentProfile = {
+        profile: {
+          ...baseProfile,
+          alias: 'mallory@satspath.com',
+        },
+        signature: signed.signature,
+      }
+      expect(verifySatsPathProfileSignature(tamperedProfile)).toBe(false)
+
+      const invalidSigProfile: SignedPaymentProfile = {
+        profile: baseProfile,
+        signature: '0'.repeat(128),
+      }
+      expect(verifySatsPathProfileSignature(invalidSigProfile)).toBe(false)
     })
   })
 
@@ -65,34 +152,45 @@ describe('SatsPath Multi-Rail Lib', () => {
   })
 
   describe('analyzeSatsPathRoutes', () => {
-    const mockProfile: SignedPaymentProfile = {
-      profile: {
-        alias: 'alice@satspath.com',
-        identity_pubkey: '020000000000000000000000000000000000000000000000000000000000000001',
-        methods: [
-          {
-            type: 'Ark',
-            server: 'https://ark.satspath.com',
-            pubkey: '020000000000000000000000000000000000000000000000000000000000000002',
-          },
-          {
-            type: 'Lightning',
-            lightning_address: 'alice@satspath.com',
-          },
-          {
-            type: 'Onchain',
-            address: 'bc1qtestaddress999999999999999999999999',
-          },
-        ],
-        updated_at: 1700000000,
-        preferences: ['Ark', 'Lightning', 'Onchain'],
-        method_verifications: [],
-      },
+    const testPrivKey = new Uint8Array(32).fill(3)
+    const testPubKeyHex = bytesToHex(schnorr.getPublicKey(testPrivKey))
+
+    const validProfileData: PaymentProfile = {
+      alias: 'alice@satspath.com',
+      identity_pubkey: testPubKeyHex,
+      methods: [
+        {
+          type: 'Ark',
+          label: 'Ark',
+          server: 'https://ark.satspath.com',
+          pubkey: '020000000000000000000000000000000000000000000000000000000000000002',
+        },
+        {
+          type: 'Lightning',
+          label: 'Lightning',
+          lightning_address: 'alice@satspath.com',
+        },
+        {
+          type: 'Onchain',
+          label: 'Onchain',
+          network: 'mainnet',
+          address: 'bc1qtestaddress999999999999999999999999',
+          address_list: ['bc1qtestaddress999999999999999999999999'],
+        },
+      ],
+      updated_at: 1700000000,
+      preferences: ['Ark', 'Lightning', 'Onchain'],
+      method_verifications: [],
+    }
+
+    const validSignedProfile = signSatsPathProfile(validProfileData, testPrivKey)
+    const invalidSignedProfile: SignedPaymentProfile = {
+      profile: validProfileData,
       signature: '0'.repeat(128),
     }
 
-    it('generates multi-rail quotes for Ark, Lightning, and Onchain', async () => {
-      const analysis = await analyzeSatsPathRoutes(mockProfile, 50_000, 'normal', 'alice@satspath.com', {
+    it('generates multi-rail quotes for Ark, Lightning, and Onchain with verified profile', async () => {
+      const analysis = await analyzeSatsPathRoutes(validSignedProfile, 50_000, 'normal', 'alice@satspath.com', {
         fastest_fee: 25,
         half_hour_fee: 15,
         hour_fee: 10,
@@ -112,6 +210,18 @@ describe('SatsPath Multi-Rail Lib', () => {
       expect(analysis.quotes.onchain).toBeDefined()
       expect(analysis.quotes.onchain?.rail).toBe('Onchain')
       expect(analysis.quotes.onchain?.destination).toBe('bc1qtestaddress999999999999999999999999')
+    })
+
+    it('marks profile as unverified when signature is invalid', async () => {
+      const analysis = await analyzeSatsPathRoutes(invalidSignedProfile, 50_000, 'normal', 'alice@satspath.com', {
+        fastest_fee: 25,
+        half_hour_fee: 15,
+        hour_fee: 10,
+        minimum_fee: 5,
+      })
+
+      expect(analysis.recipient).toBe('alice@satspath.com')
+      expect(analysis.isVerifiedProfile).toBe(false)
     })
   })
 
