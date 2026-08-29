@@ -23,6 +23,7 @@ import SettingsPageTransition from '../../components/SettingsPageTransition'
 import Haptics from './Haptics'
 import Contracts from './Contracts'
 import Solvers from './Solvers'
+import Profile from './Profile'
 
 function settingsContent(option: SettingsOptions): JSX.Element {
   switch (option) {
@@ -56,6 +57,8 @@ function settingsContent(option: SettingsOptions): JSX.Element {
       return <Notifications />
     case SettingsOptions.Password:
       return <Password />
+    case SettingsOptions.Profile:
+      return <Profile />
     case SettingsOptions.Reset:
       return <Reset />
     case SettingsOptions.Server:

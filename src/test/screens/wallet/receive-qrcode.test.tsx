@@ -252,7 +252,12 @@ describe('Receive QR Code screen', () => {
 })
 
 describe('resolveQrValue', () => {
-  const opts = { bip21: 'bitcoin:unified', btc: 'bc1addr', ark: 'ark1addr' }
+  const opts = {
+    bip21: 'bitcoin:unified',
+    btc: 'bc1addr',
+    ark: 'ark1addr',
+    satpath: 'bitcoin:unified?satspath_profile=...',
+  }
 
   it('defaults to the unified BIP21 URI when nothing is selected', () => {
     expect(resolveQrValue('', opts)).toBe('bitcoin:unified')

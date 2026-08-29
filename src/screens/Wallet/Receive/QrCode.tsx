@@ -33,6 +33,7 @@ import Text, { TextSecondary } from '../../../components/Text'
 import { copyToClipboard } from '../../../lib/clipboard'
 import { useToast } from '../../../components/Toast'
 import { prettyLongText, prettyNumber, toSatoshis } from '../../../lib/format'
+import { buildSatsPathUnifiedUri } from '../../../lib/satspath'
 import CopyIcon from '../../../icons/Copy'
 import CheckMarkIcon from '../../../icons/CheckMark'
 import { hapticSubtle } from '../../../lib/haptics'
@@ -56,8 +57,11 @@ import { LnReceiveContext } from '../../../providers/lnReceive'
  * change), fall back to the unified BIP21 URI. This stops async rebuilds from
  * silently reverting the user's pick and copying the wrong thing.
  */
-export const resolveQrValue = (selected: string, options: { bip21: string; btc: string; ark: string }): string => {
-  const candidates = [options.bip21, options.btc, options.ark].filter(Boolean)
+export const resolveQrValue = (
+  selected: string,
+  options: { bip21: string; btc: string; ark: string; satpath: string },
+): string => {
+  const candidates = [options.bip21, options.btc, options.ark, options.satpath].filter(Boolean)
   return selected && candidates.includes(selected) ? selected : options.bip21
 }
 
@@ -104,6 +108,7 @@ export default function ReceiveQRCode() {
   const [qrCodeValue, setQrCodeValue] = useState('')
   const [selectedValue, setSelectedValue] = useState('')
   const [bip21Uri, setBip21Uri] = useState('')
+  const [satpathUri, setSatpathUri] = useState('')
   const [lnReceiveError, setLnReceiveError] = useState('')
   // A negotiation that failed at the local registration step left nothing
   // payable behind, so the offer of a retry is honest — see the catch below.
@@ -137,14 +142,27 @@ export default function ReceiveQRCode() {
       })
   }, [svcWallet])
 
-  const createBip21 = (): { ark: string; btc: string; bip21: string } => {
+  const createBip21 = (): { ark: string; btc: string; bip21: string; satpath: string } => {
     const ark = vtxoTxsAllowed() ? recvInfo.offchainAddr : ''
     const btc = utxoTxsAllowed() ? recvInfo.boardingAddr : ''
     const bip21 = isAssetReceive
       ? encodeBip21Asset(ark, assetId, assetAmount, assetMeta?.metadata?.decimals)
       : encodeBip21(btc, ark, recvInfo.invoice ?? '', satoshis, '')
 
-    return { ark, btc, bip21 }
+    // Multi-rail SatsPath QR: unifies on-chain fallback, Ark (preferred) and the
+    // negotiated Lightning invoice into a single BIP-21 URI. Traditional wallets
+    // still read `bitcoin:`/`lightning:`, SatsPath wallets prioritise Ark.
+    const satpath = isAssetReceive
+      ? ''
+      : buildSatsPathUnifiedUri({
+          onchainAddress: btc,
+          arkAddress: ark,
+          lightningInvoice: recvInfo.invoice ?? '',
+          amountSats: satoshis,
+          label: 'Arkade SatsPath',
+        })
+
+    return { ark, btc, bip21, satpath }
   }
 
   /**
@@ -237,15 +255,16 @@ export default function ReceiveQRCode() {
   useEffect(() => {
     if (!addressesLoaded) return
 
-    const { ark, btc, bip21 } = createBip21()
+    const { ark, btc, bip21, satpath } = createBip21()
 
     setNoPaymentMethods(!ark && !btc && !isAssetReceive)
     setArkAddress(ark)
     setBtcAddress(btc)
     setBip21Uri(bip21)
+    setSatpathUri(satpath)
     // Preserve an explicit copy-sheet selection across rebuilds; only fall back
     // to the unified URI when the selected value is no longer one we offer.
-    setQrCodeValue(resolveQrValue(selectedValue, { bip21, btc, ark }))
+    setQrCodeValue(resolveQrValue(selectedValue, { bip21, btc, ark, satpath }))
   }, [
     assetAmount,
     addressesLoaded,
@@ -533,6 +552,7 @@ export default function ReceiveQRCode() {
             bip21Uri={bip21Uri}
             btcAddress={btcAddress}
             arkAddress={arkAddress}
+            satpathUri={satpathUri}
             invoice={recvInfo.invoice ?? ''}
             onCopy={handleCopy}
             onSelect={(v) => {
@@ -552,6 +572,7 @@ function AddressList({
   bip21Uri,
   btcAddress,
   arkAddress,
+  satpathUri,
   invoice,
   onCopy,
   onSelect,
@@ -560,6 +581,7 @@ function AddressList({
   bip21Uri: string
   btcAddress: string
   arkAddress: string
+  satpathUri: string
   invoice: string
   onCopy: (value: string) => void
   onSelect: (value: string) => void
@@ -567,6 +589,16 @@ function AddressList({
 }) {
   return (
     <FlexCol gap='0.75rem'>
+      {satpathUri ? (
+        <AddressLine
+          testId='satspath'
+          title='SatsPath (multi-rail)'
+          value={satpathUri}
+          onCopy={onCopy}
+          onSelect={onSelect}
+          copied={copied}
+        />
+      ) : null}
       {bip21Uri ? (
         <AddressLine
           testId='bip21'

@@ -6,6 +6,7 @@ import {
   ArkMethod,
   LightningMethod,
   OnchainMethod,
+  BitcoinNetwork,
 } from '@satspath/resolvers'
 import {
   selectRoute,
@@ -13,6 +14,7 @@ import {
   estimateOnchainFee,
   fetchFeeEstimate,
   FALLBACK_FEES,
+  buildQrPayload,
   type FeeEstimate,
   type PaymentUrgency,
 } from '@satspath/router'
@@ -334,23 +336,47 @@ export function buildSatsPathUnifiedUri(options: {
   onchainAddress?: string
   arkAddress?: string
   lightningInvoice?: string
+  lightningAddress?: string
+  lightningLnurl?: string
   amountSats?: number
   label?: string
   message?: string
+  satspathProfile?: string
 }): string {
   const base = options.onchainAddress || options.arkAddress || ''
   if (!base) return ''
 
   const params = new URLSearchParams()
+
   if (options.amountSats) {
     params.set('amount', (options.amountSats / 100_000_000).toFixed(8))
   }
+
+  // Ark is the preferred zero-fee, instant rail. It is only added as a
+  // separate parameter when the base address is the on-chain fallback, so a
+  // SatsPath-aware wallet can prioritise it without breaking traditional ones.
   if (options.arkAddress && options.arkAddress !== base) {
     params.set('ark', options.arkAddress)
   }
-  if (options.lightningInvoice) {
-    params.set('lightning', options.lightningInvoice.toUpperCase())
+
+  // Lightning parameter is produced through buildQrPayload so the encoded value
+  // matches the canonical Lightning URI form (LNURL > Lightning Address > BOLT12).
+  if (options.lightningInvoice || options.lightningAddress || options.lightningLnurl) {
+    const lightning = buildQrPayload(
+      {
+        type: 'Lightning',
+        label: 'Lightning',
+        lightning_address: options.lightningAddress,
+        lnurl: options.lightningLnurl,
+        bolt12: options.lightningInvoice,
+      },
+      options.amountSats ?? 0,
+    )
+    if (lightning) {
+      params.set('lightning', lightning.toUpperCase())
+    }
   }
+
   if (options.label) {
     params.set('label', options.label)
   }
@@ -358,6 +384,143 @@ export function buildSatsPathUnifiedUri(options: {
     params.set('message', options.message)
   }
 
+  // Self-contained, signed PaymentProfile so any SatsPath-compatible scanner can
+  // verify the recipient identity and present all rails without a second lookup.
+  if (options.satspathProfile) {
+    params.set('satspath_profile', options.satspathProfile)
+  }
+
   const query = params.toString()
   return query ? `bitcoin:${base}?${query}` : `bitcoin:${base}`
+}
+
+/**
+ * URL-encodes a signed profile for embedding in the `satspath_profile=` BIP-21
+ * parameter. Kept separate so callers can also persist/share the raw JSON.
+ */
+export function encodeSignedProfileForUri(profile: SignedPaymentProfile): string {
+  return encodeURIComponent(JSON.stringify(profile))
+}
+
+/**
+ * Default TTL for a freshly signed own profile. Dynamic receive profiles are
+ * short-lived so a leaked/rotated on-chain address cannot be reused indefinitely.
+ */
+export const DEFAULT_PROFILE_TTL_SECONDS = 24 * 60 * 60
+
+/**
+ * Inputs required to build the wallet's own PaymentProfile.
+ *
+ * The identity public key is derived from `privateKey` (BIP-340 x-only), keeping
+ * the signing key and the advertised identity in lock-step. Lightning fields are
+ * optional: many wallets only expose a dynamic invoice, not a static address, so
+ * a profile is still valid with just Ark + On-chain rails.
+ */
+export interface OwnPaymentProfileInput {
+  alias: string
+  privateKey: Uint8Array
+  arkAddress: string
+  arkServer?: string
+  onchainAddress: string
+  lightningAddress?: string
+  lightningLnurl?: string
+  lightningInvoice?: string
+  ttlSeconds?: number
+  network?: BitcoinNetwork
+  label?: string
+}
+
+/**
+ * Builds the wallet's own PaymentProfile without signing it.
+ */
+export function createOwnPaymentProfile(input: OwnPaymentProfileInput): PaymentProfile {
+  const now = Math.floor(Date.now() / 1000)
+  const identityPubkey = bytesToHex(schnorr.getPublicKey(input.privateKey))
+
+  const methods: TypedPaymentMethod[] = []
+
+  if (input.arkAddress) {
+    const ark: ArkMethod = {
+      type: 'Ark',
+      label: input.label || 'Arkade (VTXO)',
+      server: input.arkServer || '',
+      pubkey: input.arkAddress,
+    }
+    if (input.lightningInvoice) {
+      // Reuse the short-lived invoice as a proof of ownership hint where present.
+      ark.opaque_uri = input.lightningInvoice
+    }
+    methods.push(ark)
+  }
+
+  if (input.lightningAddress || input.lightningLnurl || input.lightningInvoice) {
+    methods.push({
+      type: 'Lightning',
+      label: 'Lightning',
+      lightning_address: input.lightningAddress,
+      lnurl: input.lightningLnurl,
+      bolt12: input.lightningInvoice,
+    })
+  }
+
+  if (input.onchainAddress) {
+    methods.push({
+      type: 'Onchain',
+      label: 'Bitcoin On-chain',
+      network: input.network ?? 'mainnet',
+      address: input.onchainAddress,
+      address_list: [input.onchainAddress],
+    })
+  }
+
+  return {
+    alias: input.alias,
+    identity_pubkey: identityPubkey,
+    methods,
+    updated_at: now,
+    expires_at: now + (input.ttlSeconds ?? DEFAULT_PROFILE_TTL_SECONDS),
+    preferences: [],
+    method_verifications: [],
+  }
+}
+
+/**
+ * Builds and Schnorr-signs the wallet's own PaymentProfile using its identity key.
+ * The resulting SignedPaymentProfile can be embedded in a unified receive QR
+ * (satspath_profile=) or shared as a standalone claimable identity.
+ */
+export function createSignedProfileFromWallet(input: OwnPaymentProfileInput): SignedPaymentProfile {
+  const profile = createOwnPaymentProfile(input)
+  return signSatsPathProfile(profile, input.privateKey)
+}
+
+const SATSPATH_IDENTITY_KEY = 'satspath:identity:v1'
+
+export interface SatsPathIdentitySettings {
+  alias: string
+  lightningAddress?: string
+  lightningLnurl?: string
+}
+
+export function loadSatsPathIdentitySettings(): SatsPathIdentitySettings {
+  try {
+    const raw = localStorage.getItem(SATSPATH_IDENTITY_KEY)
+    if (!raw) return { alias: '' }
+    const parsed = JSON.parse(raw) as Partial<SatsPathIdentitySettings>
+    return {
+      alias: typeof parsed.alias === 'string' ? parsed.alias : '',
+      lightningAddress: typeof parsed.lightningAddress === 'string' ? parsed.lightningAddress : undefined,
+      lightningLnurl: typeof parsed.lightningLnurl === 'string' ? parsed.lightningLnurl : undefined,
+    }
+  } catch {
+    return { alias: '' }
+  }
+}
+
+export function saveSatsPathIdentitySettings(settings: SatsPathIdentitySettings): void {
+  try {
+    localStorage.setItem(SATSPATH_IDENTITY_KEY, JSON.stringify(settings))
+  } catch {
+    // storage unavailable — non-fatal for in-memory alias configuration
+  }
 }

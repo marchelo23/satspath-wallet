@@ -74,6 +74,7 @@ export enum SettingsOptions {
   Notifications = 'notifications',
   Notes = 'notes',
   Password = 'change password',
+  Profile = 'satspath profile',
   Reset = 'reset wallet',
   Server = 'server',
   Solvers = 'solvers',
