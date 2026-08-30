@@ -1,0 +1,16 @@
+{
+  "name": "satspath-wasm",
+  "type": "module",
+  "description": "WASM bindings for SatsPath — minimal crypto, resolver, and router for browser/PWA",
+  "version": "0.1.0",
+  "files": [
+    "satspath_wasm_bg.wasm",
+    "satspath_wasm.js",
+    "satspath_wasm.d.ts"
+  ],
+  "main": "satspath_wasm.js",
+  "types": "satspath_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
