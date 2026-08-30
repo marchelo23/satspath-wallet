@@ -14,7 +14,7 @@
     "@noble/curves": "^2.0.1",
     "@noble/hashes": "^2.0.1",
     "@noble/secp256k1": "3.0.0",
-    "@satspath/wasm": "link:public/satspath-wasm-pkg",
+    "@satspath/wasm": "file:public/satspath-wasm-pkg",
     "@scure/base": "2.0.0",
     "@scure/bip32": "2.0.0",
     "@scure/bip39": "2.0.0",
