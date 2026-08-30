@@ -1,0 +1,14 @@
+services:
+  satspathd:
+    build: .
+    container_name: satspathd
+    ports:
+      - "9737:9737"
+    volumes:
+      - satspath-data:/data
+    environment:
+      - SATSPATHD_CORS_ORIGIN=*
+    restart: unless-stopped
+
+volumes:
+  satspath-data:

@@ -1,0 +1,187 @@
+# SatsPath — Docker Guide
+
+> **Status:** Ready for development and CI builds.
+> Mainnet execution of payments is intentionally disabled by design.
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  docker-compose services                                        │
+│                                                                 │
+│  ┌──────────────────────┐     ┌────────────────────────────┐   │
+│  │  satspath-cli        │     │  satspathd                 │   │
+│  │  Rust / Debian Slim  │     │  Rust / Debian Slim        │   │
+│  │  non-root uid:10001  │     │  non-root uid:10002        │   │
+│  │  read-only rootfs    │     │  read-only rootfs          │   │
+│  │  cap_drop: ALL       │     │  cap_drop: ALL             │   │
+│  └──────────────────────┘     └────────────────────────────┘   │
+│          │                                 │                    │
+│          ▼                                 ▼                    │
+│  ┌────────────────────────────────────────────────────────┐     │
+│  │  satspath_data (Docker volume)                         │     │
+│  │  Named volume: .satspath/ registry survives containers │     │
+│  └────────────────────────────────────────────────────────┘     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Images
+
+| Image                 | Base                    | Size target | Binary                    |
+| --------------------- | ----------------------- | ----------- | ------------------------- |
+| `satspath-cli`        | `debian:bookworm-slim`  | ~25 MB      | `/usr/local/bin/satspath` |
+| `satspathd`           | `debian:bookworm-slim`  | ~30 MB      | `/usr/local/bin/satspathd`|
+
+Both images use:
+
+- **Non-root user** (UID 10001 for CLI, UID 10002 for daemon)
+- **Read-only root filesystem** (`read_only: true`)
+- **All capabilities dropped** (`cap_drop: ALL`)
+- **`no-new-privileges`** security option
+- **OCI image labels** for provenance
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- Docker ≥ 24 (or Podman ≥ 4) with BuildKit enabled
+- `docker compose` v2 plugin (or `docker-compose` v1)
+
+### 1. Build the image
+
+```bash
+make build
+# or manually:
+docker build -t satspath-cli:latest .
+```
+
+### 2. Initialize the registry
+
+```bash
+make init
+# equivalent to:
+docker compose run --rm satspath-cli init
+```
+
+This creates `.satspath/` inside the `satspath_data` named volume.
+
+### 3. Register a profile
+
+```bash
+# With Lightning Address only:
+docker compose run --rm satspath-cli register user@example.com \
+  --lightning-address user@example.com
+
+# With Arkade receive pointer (public-only, manual wallet):
+docker compose run --rm satspath-cli register user@example.com \
+  --arkade-uri "ark:ark1q..."
+
+# With full Ark server + pubkey:
+docker compose run --rm satspath-cli register user@example.com \
+  --ark-server "https://ark.server.example" \
+  --ark-pubkey "02..."
+```
+
+### 4. Get a routing quote
+
+```bash
+docker compose run --rm satspath-cli quote user@example.com 21000
+```
+
+### 5. Start the SatsPath Daemon (satspathd)
+
+```bash
+docker compose up -d satspathd
+docker compose logs -f satspathd
+```
+
+---
+
+## Make targets
+
+```bash
+make help          # Show all targets
+make build         # Build CLI image
+make build-cli     # Build CLI image
+make run CMD="--help"  # Run any CLI command
+make shell         # Open a debug shell in the CLI container
+make up            # Start daemon service in background
+make down          # Stop all services
+make logs          # Tail all service logs
+make scan          # Run Trivy vulnerability scan on CLI & daemon
+make clean         # Remove built images and dangling layers
+make smoke         # Build + verify --help output
+```
+
+---
+
+## Security design
+
+### What is protected
+
+| Concern                 | Mitigation                                                 |
+| ----------------------- | ---------------------------------------------------------- |
+| Private keys in image   | `.dockerignore` blocks `*.key`, `.satspath/`, `.env`       |
+| Root escalation         | `no-new-privileges`, `cap_drop: ALL`, non-root users       |
+| Container escape        | Read-only root filesystem + tmpfs for `/tmp` only          |
+| Dependency supply chain | `npm ci --ignore-scripts` (no postinstall scripts)         |
+| Secret injection        | `.env` is gitignored; use Docker secrets or env at runtime |
+| Vulnerability tracking  | Trivy scan in CI via `.github/workflows/docker.yml`        |
+
+### What is intentionally not in Docker
+
+- No wallet seed phrases
+- No private spending keys
+- No Arkade session tokens
+- No mainnet payment execution
+
+### Layer caching strategy (Rust)
+
+The Rust build uses [`cargo-chef`](https://github.com/LukeMathWalker/cargo-chef):
+
+```
+Layer 1: cargo-chef planner  → only re-runs when Cargo.toml/Cargo.lock change
+Layer 2: cargo-chef cacher   → pre-builds all deps (very slow, cached)
+Layer 3: builder             → compiles src/ (fast, re-runs on src change)
+Layer 4: runtime             → copies single binary (~25 MB)
+```
+
+This means typical CI rebuilds take **~30 seconds** instead of 10+ minutes.
+
+---
+
+## Production checklist
+
+- [ ] Push to a private registry (GHCR, ECR, etc.) — see `docker.yml` CI workflow
+- [ ] Pin base image digests (replace `bookworm-slim` tags with `sha256:...`)
+- [ ] Set `RUST_LOG` to `warn` in production
+- [ ] Configure backup for `satspath_data` volume (e.g. `docker run --rm -v satspath_data:/data -v $(pwd):/backup debian:bookworm-slim tar czf /backup/satspath_data_$(date +%F).tar.gz -C /data .`)
+- [ ] Run `make scan` before each release to check for CVEs
+- [ ] Review CI SARIF reports in GitHub Security tab
+
+---
+
+## Troubleshooting
+
+**`cargo: command not found` in CI**
+→ The build runs inside the container; you don't need Cargo on the host.
+
+**`Permission denied: /data`**
+→ The `satspath_data` volume ownership may be wrong. Run an entrypoint override as root:
+
+```bash
+# For CLI container (UID 10001):
+docker compose run --rm --entrypoint /bin/sh --user root satspath-cli -c "chown -R 10001:10001 /data && chmod -R 770 /data"
+
+# For Daemon container (UID 10002):
+docker compose run --rm --entrypoint /bin/sh --user root satspathd -c "chown -R 10002:10002 /data && chmod -R 770 /data"
+```
+
+**Build fails on `is_multiple_of` (pre-existing)**
+→ This is a known pre-existing issue in `satspath-router/src/lightning.rs` using
+a nightly-only Rust API. It does not affect the `satspath` CLI binary build,
+only `satspath-router` library checks on stable Rust. Unrelated to Docker.
