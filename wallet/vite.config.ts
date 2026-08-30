@@ -8,6 +8,7 @@ import basicAuth from './plugins/vite-plugin-basic-auth'
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: process.env.GITHUB_ACTIONS ? '/satspath-wallet/' : '/',
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
