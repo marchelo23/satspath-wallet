@@ -8,9 +8,14 @@ import init, {
 } from '@satspath/wasm'
 import { mnemonicToSeedSync } from '@scure/bip39'
 import { consoleError } from '../lib/logs'
+import { getMnemonic, hasMnemonic } from '../lib/mnemonic'
+import { defaultPassword } from '../lib/constants'
 
 // ─── Daemon config ────────────────────────────────────────────────────────────
-const SATSPATH_URL = import.meta.env.VITE_SATSPATH_URL || 'http://localhost:9737'
+const SATSPATH_URL =
+  import.meta.env.VITE_SATSPATH_URL ||
+  import.meta.env.VITE_SATSPATH_API ||
+  'https://satspath-wallet-production-d55f.up.railway.app'
 const SATSPATH_AUTH = import.meta.env.VITE_SATSPATH_AUTH_TOKEN || ''
 
 // ─── localStorage keys ────────────────────────────────────────────────────────
@@ -250,6 +255,24 @@ export const SatsPathProvider = ({ children }: { children: ReactNode }) => {
             // stale or malformed cache — ignore
           }
         }
+
+        // Auto-derive identity if wallet mnemonic is available
+        if (hasMnemonic()) {
+          getMnemonic(defaultPassword)
+            .then((m) => {
+              if (m) {
+                const seed = mnemonicToSeedSync(m)
+                const res = derive_identity_keypair_from_seed(seed, 0)
+                if (res) {
+                  setIdentity({
+                    pubkey_hex: res.pubkey_hex,
+                    secret_key_hex: res.secret_key_hex,
+                  })
+                }
+              }
+            })
+            .catch(() => {})
+        }
       })
       .catch((err) => {
         consoleError(err, 'Failed to initialize SatsPath WASM')
@@ -263,13 +286,14 @@ export const SatsPathProvider = ({ children }: { children: ReactNode }) => {
       const res = await daemonFetch<SatsPathDaemonStatus>('/v1/status')
       setDaemonConnected(true)
       setDaemonStatus(res)
+      refreshDaemonProfile()
       return true
     } catch {
       setDaemonConnected(false)
       setDaemonStatus(null)
       return false
     }
-  }, [])
+  }, [refreshDaemonProfile])
 
   useEffect(() => {
     checkDaemonHealth()

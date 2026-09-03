@@ -48,6 +48,7 @@ jobs:
       - name: Build Wallet
         working-directory: ./wallet
         env:
+          VITE_SATSPATH_URL: "https://satspath-wallet-production-d55f.up.railway.app"
           VITE_SATSPATH_API: "https://satspath-wallet-production-d55f.up.railway.app"
           VITE_NETWORK: "testnet"
           VITE_ARK_SERVER: "https://mutinynet.arkade.sh"
