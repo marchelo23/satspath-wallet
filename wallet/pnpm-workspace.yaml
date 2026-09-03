@@ -1,3 +1,6 @@
+packages:
+  - '.'
+
 allowBuilds:
   '@arkade-os/swap': true
 

@@ -29,13 +29,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'pnpm'
           cache-dependency-path: 'wallet/pnpm-lock.yaml'
 
       - name: Install dependencies
         working-directory: ./wallet
-        run: pnpm install
+        run: pnpm install --ignore-scripts
 
       - name: Build worker bundle
         working-directory: ./wallet
@@ -52,7 +52,12 @@ jobs:
           VITE_NETWORK: "testnet"
           VITE_ARK_SERVER: "https://mutinynet.arkade.sh"
           VITE_BASE_URL: "/satspath-wallet/"
-        run: npx vite build --base=/satspath-wallet/
+        run: pnpm exec vite build --base=/satspath-wallet/
+
+      - name: Prepare SPA for GitHub Pages
+        run: |
+          touch wallet/dist/.nojekyll
+          cp wallet/dist/index.html wallet/dist/404.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
