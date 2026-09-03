@@ -597,8 +597,9 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
       await Promise.all([walletRepository.getWalletState(), zombieCheck])
       setLoadingStatus('Connecting to service worker...')
 
+      const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
       const svcWallet = await ServiceWorkerWallet.setup({
-        serviceWorkerPath: '/wallet-service-worker.mjs',
+        serviceWorkerPath: `${base}/wallet-service-worker.mjs`,
         identity,
         arkServerUrl,
         esploraUrl,

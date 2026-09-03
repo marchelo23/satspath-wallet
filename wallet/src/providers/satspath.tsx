@@ -235,7 +235,8 @@ export const SatsPathProvider = ({ children }: { children: ReactNode }) => {
     if (initRef.current) return
     initRef.current = true
 
-    init('/satspath_wasm_bg.wasm')
+    const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
+    init(`${base}/satspath_wasm_bg.wasm`)
       .then(() => {
         setInitialized(true)
         localRegistry.current = new LocalRegistry()

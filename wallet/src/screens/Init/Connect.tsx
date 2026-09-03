@@ -52,9 +52,12 @@ export default function InitConnect() {
 
   const abortConnectionWithError = (err: any) => {
     consoleError(err, 'Error during connection:')
-    setLoadingStatus('Connection failed')
-    setError('Connection failed')
-    setConnectDone(true)
+    const msg = err?.message ? `Connection failed: ${err.message}` : 'Connection failed'
+    setLoadingStatus(msg)
+    setError(msg)
+    setTimeout(() => {
+      setConnectDone(true)
+    }, 2500)
   }
 
   return (

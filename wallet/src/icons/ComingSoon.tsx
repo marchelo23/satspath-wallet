@@ -1,3 +1,4 @@
 export default function ComingSoonIcon() {
-  return <img height='48px' width='48px' src='/coming-soon.png' />
+  const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
+  return <img height='48px' width='48px' src={`${base}/coming-soon.png`} />
 }

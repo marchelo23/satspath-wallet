@@ -1,3 +1,4 @@
 export default function WalletNewIcon() {
-  return <img height='183px' width='190px' src='/wallet-new.png' />
+  const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
+  return <img height='183px' width='190px' src={`${base}/wallet-new.png`} />
 }
