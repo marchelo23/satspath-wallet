@@ -1,7 +1,7 @@
 # Multi-stage build for satspathd
 # Railway: Root Directory = blank, Dockerfile Path = Dockerfile
 
-FROM rust:1.80-slim-bookworm AS builder
+FROM rust:1.85-slim-bookworm AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config libssl-dev build-essential \
