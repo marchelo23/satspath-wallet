@@ -276,19 +276,23 @@ struct KeyRotationResponse {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let bind = cli
+    let bind_str = cli
         .bind
         .or_else(|| std::env::var("SATSPATHD_BIND").ok())
-        .unwrap_or_else(|| DEFAULT_BIND.to_string())
+        .or_else(|| std::env::var("PORT").ok().map(|p| format!("0.0.0.0:{}", p)))
+        .unwrap_or_else(|| DEFAULT_BIND.to_string());
+    let bind = bind_str
         .parse::<SocketAddr>()
         .context("invalid bind address")?;
     let network = cli
         .network
         .or_else(|| std::env::var("SATSPATH_NETWORK").ok())
+        .or_else(|| std::env::var("NETWORK").ok())
         .unwrap_or_else(|| DEFAULT_NETWORK.to_string());
     let home = cli
         .home
         .or_else(|| std::env::var_os("SATSPATH_HOME").map(PathBuf::from))
+        .or_else(|| std::env::var_os("DATA_DIR").map(PathBuf::from))
         .unwrap_or_else(default_home);
 
     fs::create_dir_all(&home).context("creating SATSPATH_HOME")?;
@@ -1846,7 +1850,9 @@ fn json_header() -> Header {
 }
 
 fn cors_origin_header() -> Header {
-    let origin = std::env::var("SATSPATHD_CORS_ORIGIN").unwrap_or_else(|_| "*".to_string());
+    let origin = std::env::var("SATSPATHD_CORS_ORIGIN")
+        .or_else(|_| std::env::var("CORS_ORIGIN"))
+        .unwrap_or_else(|_| "*".to_string());
     Header::from_bytes(&b"Access-Control-Allow-Origin"[..], origin.as_bytes())
         .expect("valid static header")
 }

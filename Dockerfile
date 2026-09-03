@@ -1,18 +1,18 @@
-# Multi-stage Docker build for satspathd (from within /satspath)
+# Multi-stage Docker build for satspathd (Rust Backend)
 FROM rust:1.80-slim-bookworm AS builder
 
 RUN apt-get update && apt-get install -y pkg-config libssl-dev build-essential && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-COPY Cargo.toml Cargo.lock ./
-COPY crates ./crates
+WORKDIR /app/satspath
+COPY satspath/Cargo.toml satspath/Cargo.lock ./
+COPY satspath/crates ./crates
 
 RUN cargo build --release -p satspathd
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/release/satspathd /usr/local/bin/satspathd
+COPY --from=builder /app/satspath/target/release/satspathd /usr/local/bin/satspathd
 
 RUN mkdir -p /data
 ENV SATSPATH_HOME=/data
