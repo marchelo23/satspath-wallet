@@ -37,13 +37,22 @@ jobs:
         working-directory: ./wallet
         run: pnpm install
 
+      - name: Build worker bundle
+        working-directory: ./wallet
+        run: pnpm run build:worker
+
+      - name: Generate git info
+        working-directory: ./wallet
+        run: pnpm run git-info
+
       - name: Build Wallet
         working-directory: ./wallet
         env:
           VITE_SATSPATH_API: "https://satspath-wallet-production-d55f.up.railway.app"
           VITE_NETWORK: "testnet"
           VITE_ARK_SERVER: "https://mutinynet.arkade.sh"
-        run: pnpm run build --base=/satspath-wallet/
+          VITE_BASE_URL: "/satspath-wallet/"
+        run: npx vite build --base=/satspath-wallet/
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
