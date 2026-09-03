@@ -1,5 +1,5 @@
-# Multi-stage build — expects build context = repo root
-# Railway: set Root Directory = blank (root), Dockerfile Path = Dockerfile
+# Multi-stage build for satspathd
+# Railway: Root Directory = blank, Dockerfile Path = Dockerfile
 
 FROM rust:1.80-slim-bookworm AS builder
 
@@ -9,13 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-# Copy workspace manifests first (layer cache)
-COPY satspath/Cargo.toml satspath/Cargo.lock ./
+# Copy the full satspath workspace (Cargo.lock is gitignored so we generate fresh)
+COPY satspath/ .
 
-# Copy all crates source
-COPY satspath/crates ./crates
-
-# Build release binary
+# Build only the satspathd binary
 RUN cargo build --release -p satspathd
 
 # ──────────────────────────────────────────────
@@ -29,7 +26,6 @@ COPY --from=builder /build/target/release/satspathd /usr/local/bin/satspathd
 
 RUN mkdir -p /data
 
-# Default env vars (overrideable by Railway Variables)
 ENV SATSPATH_HOME=/data
 ENV SATSPATHD_BIND=0.0.0.0:9737
 ENV SATSPATH_NETWORK=testnet
