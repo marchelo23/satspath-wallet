@@ -419,7 +419,13 @@ async fn handle_request(mut request: Request, state: &AppState) -> Result<()> {
     let is_public_mutation = path == "/v1/receive"
         || path == "/v1/send"
         || path == "/v1/dns/resolve"
+        || path == "/v1/resolve"
+        || path == "/v1/profile/challenge"
+        || path == "/v1/profile/verify"
+        || path == "/v1/profile/methods"
+        || path == "/v1/profile"
         || path == "/v1/transparency/verify/inclusion"
+        || path == "/v1/transparency/verify/consistency"
         || path == "/v2/resolve";
 
     if is_mutation && !is_public_mutation {
