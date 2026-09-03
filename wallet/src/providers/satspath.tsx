@@ -8,8 +8,6 @@ import init, {
 } from '@satspath/wasm'
 import { mnemonicToSeedSync } from '@scure/bip39'
 import { consoleError } from '../lib/logs'
-import { getMnemonic, hasMnemonic } from '../lib/mnemonic'
-import { defaultPassword } from '../lib/constants'
 
 // ─── Daemon config ────────────────────────────────────────────────────────────
 const SATSPATH_URL =
@@ -255,24 +253,6 @@ export const SatsPathProvider = ({ children }: { children: ReactNode }) => {
             // stale or malformed cache — ignore
           }
         }
-
-        // Auto-derive identity if wallet mnemonic is available
-        if (hasMnemonic()) {
-          getMnemonic(defaultPassword)
-            .then((m) => {
-              if (m) {
-                const seed = mnemonicToSeedSync(m)
-                const res = derive_identity_keypair_from_seed(seed, 0)
-                if (res) {
-                  setIdentity({
-                    pubkey_hex: res.pubkey_hex,
-                    secret_key_hex: res.secret_key_hex,
-                  })
-                }
-              }
-            })
-            .catch(() => {})
-        }
       })
       .catch((err) => {
         consoleError(err, 'Failed to initialize SatsPath WASM')
@@ -342,10 +322,15 @@ export const SatsPathProvider = ({ children }: { children: ReactNode }) => {
     prevConnected.current = true
   }, [daemonConnected, refreshDaemonProfile])
 
+  const pendingMnemonicRef = useRef<string | null>(null)
+
   // ── Identity derivation ───────────────────────────────────────────────────
   const deriveIdentity = useCallback(
     (mnemonic: string) => {
-      if (!initialized) return
+      if (!initialized) {
+        pendingMnemonicRef.current = mnemonic
+        return
+      }
       try {
         const seed = mnemonicToSeedSync(mnemonic)
         const result = derive_identity_keypair_from_seed(seed, 0)
@@ -354,6 +339,7 @@ export const SatsPathProvider = ({ children }: { children: ReactNode }) => {
             pubkey_hex: result.pubkey_hex,
             secret_key_hex: result.secret_key_hex,
           })
+          pendingMnemonicRef.current = null
         }
       } catch (err) {
         consoleError(err, 'Failed to derive SatsPath identity')
@@ -361,6 +347,12 @@ export const SatsPathProvider = ({ children }: { children: ReactNode }) => {
     },
     [initialized],
   )
+
+  useEffect(() => {
+    if (initialized && pendingMnemonicRef.current) {
+      deriveIdentity(pendingMnemonicRef.current)
+    }
+  }, [initialized, deriveIdentity])
 
   // ── Resolve and quote ─────────────────────────────────────────────────────
   const resolveAndQuote = useCallback(

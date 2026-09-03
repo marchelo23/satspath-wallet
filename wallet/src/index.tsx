@@ -63,8 +63,8 @@ root.render(
               <NotificationsProvider>
                 <FiatProvider>
                   <FlowProvider>
-                    <WalletProvider>
-                      <SatsPathProvider>
+                    <SatsPathProvider>
+                      <WalletProvider>
                         <AssetSwapsProvider>
                         <LnSwapsProvider>
                           <LnReceiveProvider>
@@ -86,8 +86,8 @@ root.render(
                           </LnReceiveProvider>
                         </LnSwapsProvider>
                         </AssetSwapsProvider>
-                      </SatsPathProvider>
-                    </WalletProvider>
+                      </WalletProvider>
+                    </SatsPathProvider>
                   </FlowProvider>
                 </FiatProvider>
               </NotificationsProvider>

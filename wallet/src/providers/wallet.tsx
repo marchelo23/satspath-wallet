@@ -365,7 +365,8 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
     const detectPasswordState = async () => {
       if (hasMnemonic()) {
         try {
-          await getMnemonic(defaultPassword)
+          const mnemonic = await getMnemonic(defaultPassword)
+          deriveSatsPathIdentity(mnemonic)
           return true // passwordless
         } catch {
           return false // has custom password
@@ -885,6 +886,7 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
       if (hasMnemonic()) {
         const mnemonic = await getMnemonic(password)
         setAuthState('authenticated')
+        deriveSatsPathIdentity(mnemonic)
         await initWallet({ mnemonic })
       } else {
         const privateKey = await getPrivateKey(password)
