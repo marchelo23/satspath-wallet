@@ -170,16 +170,23 @@ async function daemonFetch<T>(path: string, options?: RequestInit): Promise<T> {
 
 // ─── localStorage helpers ─────────────────────────────────────────────────────
 
-function readLocalAlias(): string | null {
+function readLocalAlias(pubkey?: string | null): string | null {
   try {
+    if (pubkey) {
+      const scoped = localStorage.getItem(`${STORAGE_KEY_ALIAS}_${pubkey}`)
+      if (scoped) return scoped
+    }
     return localStorage.getItem(STORAGE_KEY_ALIAS)
   } catch {
     return null
   }
 }
 
-function writeLocalAlias(alias: string): void {
+function writeLocalAlias(alias: string, pubkey?: string | null): void {
   try {
+    if (pubkey) {
+      localStorage.setItem(`${STORAGE_KEY_ALIAS}_${pubkey}`, alias)
+    }
     localStorage.setItem(STORAGE_KEY_ALIAS, alias)
   } catch {
     // storage might be full or blocked
@@ -263,13 +270,39 @@ export const SatsPathProvider = ({ children }: { children: ReactNode }) => {
   // ── Auto-sync local state to daemon on reconnection ───────────────────────
   const refreshDaemonProfile = useCallback(async () => {
     try {
-      const profile = await daemonFetch<SatsPathDaemonProfile>('/v1/profile')
-      setDaemonProfile(profile)
+      const pubkey = identity?.pubkey_hex
+      const local = readLocalAlias(pubkey)
+      let path = '/v1/profile'
+      if (pubkey) {
+        path += `?pubkey=${encodeURIComponent(pubkey)}`
+        if (local) path += `&alias=${encodeURIComponent(local)}`
+      } else if (local) {
+        path += `?alias=${encodeURIComponent(local)}`
+      }
+      const profile = await daemonFetch<SatsPathDaemonProfile>(path)
+      if (
+        pubkey &&
+        profile?.wallet?.identity_pubkey &&
+        profile.wallet.identity_pubkey !== pubkey
+      ) {
+        setDaemonProfile(null)
+      } else if (profile?.wallet?.alias) {
+        setDaemonProfile(profile)
+      } else {
+        setDaemonProfile(null)
+      }
     } catch (err) {
       consoleError(err, 'Failed to fetch daemon profile')
       setDaemonProfile(null)
     }
-  }, [])
+  }, [identity?.pubkey_hex])
+
+  useEffect(() => {
+    if (identity?.pubkey_hex) {
+      setLocalAlias(readLocalAlias(identity.pubkey_hex))
+      refreshDaemonProfile()
+    }
+  }, [identity?.pubkey_hex, refreshDaemonProfile])
 
   // ── Daemon health check (every 30 s) ─────────────────────────────────────
   const checkDaemonHealth = useCallback(async (): Promise<boolean> => {
@@ -467,10 +500,13 @@ export const SatsPathProvider = ({ children }: { children: ReactNode }) => {
   )
 
   // ── Alias persistence (local-first) ──────────────────────────────────────
-  const persistAlias = useCallback((alias: string) => {
-    writeLocalAlias(alias)
-    setLocalAlias(alias)
-  }, [])
+  const persistAlias = useCallback(
+    (alias: string) => {
+      writeLocalAlias(alias, identity?.pubkey_hex)
+      setLocalAlias(alias)
+    },
+    [identity?.pubkey_hex],
+  )
 
   // ── Alias registration (daemon challenge/verify) ──────────────────────────
   const registerAlias = useCallback(
@@ -488,11 +524,17 @@ export const SatsPathProvider = ({ children }: { children: ReactNode }) => {
 
       const res = await daemonFetch<{ challenge_id: string; message: string }>(
         '/v1/profile/challenge',
-        { method: 'POST', body: JSON.stringify({ alias }) },
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            alias,
+            identity_pubkey: identity?.pubkey_hex || undefined,
+          }),
+        },
       )
       return { challengeId: res.challenge_id, message: res.message }
     },
-    [daemonConnected, persistAlias],
+    [daemonConnected, identity?.pubkey_hex, persistAlias],
   )
 
   // ── Alias verification ────────────────────────────────────────────────────
@@ -510,13 +552,17 @@ export const SatsPathProvider = ({ children }: { children: ReactNode }) => {
 
       const res = await daemonFetch<SatsPathDaemonProfile>('/v1/profile/verify', {
         method: 'POST',
-        body: JSON.stringify({ alias, token }),
+        body: JSON.stringify({
+          alias,
+          token,
+          identity_pubkey: identity?.pubkey_hex || undefined,
+        }),
       })
       persistAlias(alias)
       setDaemonProfile(res)
       return res
     },
-    [daemonConnected, identity, persistAlias],
+    [daemonConnected, identity?.pubkey_hex, persistAlias],
   )
 
   // ── Update payment methods (localStorage + daemon) ────────────────────────
@@ -525,10 +571,13 @@ export const SatsPathProvider = ({ children }: { children: ReactNode }) => {
       // Always persist locally first
       writeLocalMethods(methods)
 
+      const alias = readLocalAlias(identity?.pubkey_hex)
+
       if (!daemonConnected) {
         const local: SatsPathDaemonProfile = {
           wallet: {
-            alias: readLocalAlias() ?? undefined,
+            alias: alias ?? undefined,
+            identity_pubkey: identity?.pubkey_hex,
             lightning_address: methods.lightning_address,
             onchain_address: methods.onchain_address,
             ark_server: methods.ark_server,
@@ -540,12 +589,16 @@ export const SatsPathProvider = ({ children }: { children: ReactNode }) => {
 
       const res = await daemonFetch<SatsPathDaemonProfile>('/v1/profile/methods', {
         method: 'POST',
-        body: JSON.stringify(methods),
+        body: JSON.stringify({
+          ...methods,
+          alias: alias || undefined,
+          identity_pubkey: identity?.pubkey_hex || undefined,
+        }),
       })
       setDaemonProfile(res)
       return res
     },
-    [daemonConnected],
+    [daemonConnected, identity?.pubkey_hex],
   )
 
   // ── Auto-sync methods (called by wallet provider when addresses change) ────
@@ -564,13 +617,17 @@ export const SatsPathProvider = ({ children }: { children: ReactNode }) => {
       writeLocalMethods(methods)
 
       // Push to daemon if connected AND we have a verified alias
-      const alias = readLocalAlias()
+      const alias = readLocalAlias(identity?.pubkey_hex)
       if (!daemonConnected || !alias) return
 
       try {
         const res = await daemonFetch<SatsPathDaemonProfile>('/v1/profile/methods', {
           method: 'POST',
-          body: JSON.stringify(methods),
+          body: JSON.stringify({
+            ...methods,
+            alias: alias || undefined,
+            identity_pubkey: identity?.pubkey_hex || undefined,
+          }),
         })
         setDaemonProfile(res)
       } catch (err) {
@@ -578,7 +635,7 @@ export const SatsPathProvider = ({ children }: { children: ReactNode }) => {
         consoleError(err, 'autoSyncMethods: daemon push failed')
       }
     },
-    [daemonConnected],
+    [daemonConnected, identity?.pubkey_hex],
   )
 
   return (

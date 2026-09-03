@@ -131,9 +131,10 @@ struct SafetyStatus {
     manages_signed_profiles: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct ProfileUpdateRequest {
     alias: Option<String>,
+    identity_pubkey: Option<String>,
     lightning_address: Option<String>,
     onchain_address: Option<String>,
     onchain_pubkey: Option<String>,
@@ -147,12 +148,17 @@ struct ProfileUpdateRequest {
 #[derive(Debug, Deserialize)]
 struct AliasRequest {
     alias: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    identity_pubkey: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct VerifyRequest {
     alias: String,
     token: String,
+    #[serde(default)]
+    identity_pubkey: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -512,7 +518,7 @@ async fn handle_request(mut request: Request, state: &AppState) -> Result<()> {
         }
         (Method::Get, "/v1/node") => json_result(StatusCode(200), node_response(state)),
         (Method::Get, "/v1/status") => json_result(StatusCode(200), status_response(state)),
-        (Method::Get, "/v1/profile") => json_result(StatusCode(200), profile_response(state)),
+        (Method::Get, "/v1/profile") => json_result(StatusCode(200), query_profile(state, &raw_url)),
         (Method::Get, "/v1/transparency/status") => json_result(
             StatusCode(200),
             transparency_log(state).and_then(|log| log.status().map_err(Into::into)),
@@ -793,8 +799,18 @@ fn verify_challenge(state: &AppState, body: VerifyRequest) -> Result<ProfileResp
         anyhow::bail!("invalid verification token for this alias");
     }
 
-    let mut wallet = load_or_create_identity(&state.home)?;
-    wallet.alias = Some(body.alias);
+    let mut wallet = if let Some(pk) = &body.identity_pubkey {
+        load_profile_by_pubkey(&state.home, pk)?
+            .unwrap_or_else(|| WalletState {
+                identity_pubkey: Some(pk.clone()),
+                created_at: Some(chrono::Utc::now().timestamp()),
+                ..Default::default()
+            })
+    } else {
+        load_or_create_identity(&state.home)?
+    };
+
+    wallet.alias = Some(body.alias.clone());
     wallet.updated_at = Some(chrono::Utc::now().timestamp());
 
     // Only sign and store if there are methods already. Otherwise just save the wallet state.
@@ -805,19 +821,72 @@ fn verify_challenge(state: &AppState, body: VerifyRequest) -> Result<ProfileResp
     {
         sign_and_store(&state.home, &mut wallet, &state.network)?;
     }
+
+    if let Some(pk) = &wallet.identity_pubkey.clone() {
+        save_profile_by_pubkey(&state.home, pk, &wallet)?;
+    }
     save_wallet(&state.home, &wallet)?;
-    profile_response(state)
+
+    let signed_profile = TransactionalTransparencyStore::open(&state.home)
+        .and_then(|store| store.profile(&body.alias))
+        .ok()
+        .flatten();
+    let signature_valid = signed_profile
+        .as_ref()
+        .map(verify_signed_profile)
+        .transpose()?;
+
+    Ok(ProfileResponse {
+        wallet,
+        signed_profile,
+        signature_valid,
+    })
 }
 
 fn update_profile_methods(state: &AppState, body: ProfileUpdateRequest) -> Result<ProfileResponse> {
-    let mut wallet = load_or_create_identity(&state.home)?;
-    if wallet.alias.is_none() {
-        anyhow::bail!("set alias first with PUT /v1/profile");
+    let mut wallet = if let Some(pk) = &body.identity_pubkey {
+        load_profile_by_pubkey(&state.home, pk)?
+            .unwrap_or_else(|| WalletState {
+                identity_pubkey: Some(pk.clone()),
+                alias: body.alias.clone(),
+                created_at: Some(chrono::Utc::now().timestamp()),
+                ..Default::default()
+            })
+    } else {
+        load_or_create_identity(&state.home)?
+    };
+
+    if let Some(alias) = &body.alias {
+        wallet.alias = Some(alias.clone());
     }
-    apply_method_updates(&mut wallet, &state.network, body, false)?;
+
+    if wallet.alias.is_none() {
+        anyhow::bail!("set alias first with /v1/profile/verify");
+    }
+
+    apply_method_updates(&mut wallet, &state.network, body.clone(), false)?;
     sign_and_store(&state.home, &mut wallet, &state.network)?;
+
+    if let Some(pk) = &wallet.identity_pubkey.clone() {
+        save_profile_by_pubkey(&state.home, pk, &wallet)?;
+    }
     save_wallet(&state.home, &wallet)?;
-    profile_response(state)
+
+    let alias = wallet.alias.clone().unwrap();
+    let signed_profile = TransactionalTransparencyStore::open(&state.home)
+        .and_then(|store| store.profile(&alias))
+        .ok()
+        .flatten();
+    let signature_valid = signed_profile
+        .as_ref()
+        .map(verify_signed_profile)
+        .transpose()?;
+
+    Ok(ProfileResponse {
+        wallet,
+        signed_profile,
+        signature_valid,
+    })
 }
 
 fn apply_method_updates(
@@ -906,12 +975,21 @@ fn sign_and_store(home: &Path, wallet: &mut WalletState, network: &str) -> Resul
         .collect();
     let next_sequence = satspath_core::next_identifier_sequence(existing.as_ref(), &history)?;
 
-    let secret = load_identity_key(home, &identity_pubkey)?;
+    let (signing_pubkey, secret) = match load_identity_key(home, &identity_pubkey) {
+        Ok(sec) => (identity_pubkey.clone(), sec),
+        Err(_) => {
+            let kp = generate_identity_keypair();
+            let pubk = hex::encode(kp.public_key.serialize());
+            save_identity_key(home, &kp.secret_key)?;
+            wallet.identity_pubkey = Some(pubk.clone());
+            (pubk, kp.secret_key)
+        }
+    };
     let t = now();
     let profile = PaymentProfile {
         sequence: Some(next_sequence),
         alias: alias.clone(),
-        identity_pubkey,
+        identity_pubkey: signing_pubkey,
         methods,
         updated_at: t,
         expires_at: Some(t + 30 * 24 * 3600), // default 30-day expiry per spec §28
@@ -1339,6 +1417,117 @@ async fn dns_resolve_response(body: DnsResolveRequest) -> DnsResolveResponse {
             strict_mode: policy == DnssecPolicy::Strict,
         },
     }
+}
+
+fn profile_by_pubkey_path(home: &Path, pubkey: &str) -> PathBuf {
+    home.join("profiles").join(format!("{pubkey}.json"))
+}
+
+fn load_profile_by_pubkey(home: &Path, pubkey: &str) -> Result<Option<WalletState>> {
+    let path = profile_by_pubkey_path(home, pubkey);
+    if path.exists() {
+        let raw = fs::read_to_string(&path)?;
+        return Ok(serde_json::from_str(&raw).ok());
+    }
+    // Check if default wallet matches this pubkey
+    if let Ok(w) = load_wallet(home) {
+        if w.identity_pubkey.as_deref() == Some(pubkey) {
+            return Ok(Some(w));
+        }
+    }
+    Ok(None)
+}
+
+fn save_profile_by_pubkey(home: &Path, pubkey: &str, wallet: &WalletState) -> Result<()> {
+    let dir = home.join("profiles");
+    fs::create_dir_all(&dir)?;
+    let json = serde_json::to_string_pretty(wallet)?;
+    assert_no_private_material(&json)?;
+    write_owner_only_file(&profile_by_pubkey_path(home, pubkey), json.as_bytes())?;
+    Ok(())
+}
+
+fn query_profile(state: &AppState, raw_url: &str) -> Result<ProfileResponse> {
+    if let Some(pubkey) = query_str(raw_url, "pubkey") {
+        if let Some(wallet) = load_profile_by_pubkey(&state.home, &pubkey)? {
+            let signed_profile = match wallet.alias.as_deref() {
+                Some(alias) => TransactionalTransparencyStore::open(&state.home)
+                    .and_then(|store| store.profile(alias))
+                    .ok()
+                    .flatten(),
+                None => None,
+            };
+            let signature_valid = signed_profile
+                .as_ref()
+                .map(verify_signed_profile)
+                .transpose()?;
+            return Ok(ProfileResponse {
+                wallet,
+                signed_profile,
+                signature_valid,
+            });
+        } else {
+            // Pubkey specified but not registered on this node yet
+            return Ok(ProfileResponse {
+                wallet: WalletState {
+                    identity_pubkey: Some(pubkey),
+                    ..Default::default()
+                },
+                signed_profile: None,
+                signature_valid: None,
+            });
+        }
+    }
+
+    if let Some(alias) = query_str(raw_url, "alias") {
+        if let Ok(store) = TransactionalTransparencyStore::open(&state.home) {
+            if let Ok(Some(signed)) = store.profile(&alias) {
+                let signature_valid = verify_signed_profile(&signed).ok();
+                let mut wallet = WalletState {
+                    alias: Some(signed.profile.alias.clone()),
+                    identity_pubkey: Some(signed.profile.identity_pubkey.clone()),
+                    created_at: Some(signed.profile.updated_at),
+                    updated_at: Some(signed.profile.updated_at),
+                    ..Default::default()
+                };
+                for m in &signed.profile.methods {
+                    match m {
+                        PaymentMethod::Lightning {
+                            lightning_address, ..
+                        } => {
+                            wallet.lightning_address = lightning_address.clone();
+                        }
+                        PaymentMethod::Onchain {
+                            address,
+                            silent_payment_pubkey,
+                            ..
+                        } => {
+                            wallet.onchain_address =
+                                address.clone().or_else(|| silent_payment_pubkey.clone());
+                        }
+                        PaymentMethod::Ark {
+                            server,
+                            pubkey,
+                            opaque_uri,
+                            ..
+                        } => {
+                            wallet.ark_server = Some(server.clone());
+                            wallet.ark_pubkey = Some(pubkey.clone());
+                            wallet.ark_address = opaque_uri.clone();
+                        }
+                        _ => {}
+                    }
+                }
+                return Ok(ProfileResponse {
+                    wallet,
+                    signed_profile: Some(signed),
+                    signature_valid,
+                });
+            }
+        }
+    }
+
+    profile_response(state)
 }
 
 fn profile_response(state: &AppState) -> Result<ProfileResponse> {

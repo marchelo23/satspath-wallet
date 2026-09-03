@@ -65,8 +65,13 @@ export default function SatsPathProfile() {
   const [challengeMessage, setChallengeMessage] = useState('')
   const [registrationStep, setRegistrationStep] = useState<'idle' | 'challenge' | 'verify' | 'done'>('idle')
 
-  // The active alias — prefer daemon profile, fall back to local storage
-  const activeAlias = daemonProfile?.wallet?.alias || localAlias
+  // The active alias — prefer daemon profile if belonging to this wallet, fall back to local storage
+  const isOurDaemonProfile =
+    !daemonProfile?.wallet?.identity_pubkey ||
+    !identity?.pubkey_hex ||
+    daemonProfile.wallet.identity_pubkey === identity.pubkey_hex
+
+  const activeAlias = (isOurDaemonProfile ? daemonProfile?.wallet?.alias : null) || localAlias
 
   // Load receiving addresses (boarding + offchain)
   useEffect(() => {
@@ -140,6 +145,7 @@ export default function SatsPathProfile() {
     setLoading(true)
     try {
       await updateProfileMethods({
+        alias: activeAlias || aliasInput || undefined,
         lightning_address: activeAlias || aliasInput || undefined,
         onchain_address: addresses.boardingAddr,
         ark_server: aspInfo.url || undefined,
@@ -162,6 +168,7 @@ export default function SatsPathProfile() {
     setLoading(true)
     try {
       await autoSyncMethods({
+        alias: activeAlias || undefined,
         lightning_address: activeAlias || undefined,
         onchain_address: addresses.boardingAddr,
         ark_server: aspInfo.url || undefined,
