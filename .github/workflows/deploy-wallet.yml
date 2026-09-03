@@ -35,7 +35,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./wallet
-        run: pnpm install --ignore-scripts
+        run: pnpm install --no-frozen-lockfile --ignore-scripts
 
       - name: Build worker bundle
         working-directory: ./wallet
