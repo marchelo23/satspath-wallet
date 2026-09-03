@@ -24,6 +24,10 @@ import { buildTransactionAmountDisplay } from '../../../lib/transactionAmountDis
 import { useAmountDisplayContext } from '../../../hooks/useTransactionAmountDisplay'
 import TransactionAmountSummary from '../../../components/TransactionAmountSummary'
 import { saveTransactionActivityMetadata } from '../../../lib/storage'
+import { AspContext } from '../../../providers/asp'
+import { parseAndResolveArkUri } from '../../../lib/arkUri'
+import { fetchInvoice } from '../../../lib/lnurl'
+
 
 export default function SendDetails() {
   const displayContext = useAmountDisplayContext()
@@ -34,6 +38,8 @@ export default function SendDetails() {
   const { utxoTxsAllowed, vtxoTxsAllowed } = useContext(LimitsContext)
   const { assetMetadataCache, balance, reloadWallet, svcWallet } = useContext(WalletContext)
   const { trackLnSend } = useContext(LnSwapsContext)
+  const { aspInfo } = useContext(AspContext)
+
 
   const assetId = sendInfo.account?.assetId ?? sendInfo.assets?.[0]?.assetId
   const assetMeta = assetId ? assetMetadataCache.get(assetId) : undefined
@@ -81,7 +87,7 @@ export default function SendDetails() {
     const isSatsPathLn = Boolean(sendInfo.lnUrl && !invoice)
     const destination =
       isSatsPathArk
-        ? 'Ark (SatsPath — requires Arkade server)'
+        ? 'Ark (SatsPath)'
         : isSatsPathLn
           ? sendInfo.lnUrl
           : arkAddress && vtxoTxsAllowed()
@@ -97,7 +103,7 @@ export default function SendDetails() {
         : isSatsPathLn
           ? 'Paying via Lightning (SatsPath)'
           : destination === arkAddress
-            ? 'Paying inside Arkade'
+            ? 'Paying via Ark'
             : destination === invoice
               ? 'Paying to Lightning'
               : destination === address
@@ -203,16 +209,35 @@ export default function SendDetails() {
         .then((txId: string) => handleTxid(txId))
         .catch(handleError)
     } else if (arkAddress && arkAddress.startsWith('ark:')) {
-      // SatsPath Ark URI — needs Arkade server to resolve to native address
-      handleError('SatsPath Ark payment requires the Arkade server to be online. The server (mutinynet.arkade.sh) is currently unreachable. Try On-chain instead.')
+      // SatsPath Ark URI — resolve to a native tark1.../ark1... address using
+      // the recipient pubkey + our ASP's signer pubkey, then send off-chain.
+      if (!details.total) return handleError('Missing total amount')
+      try {
+        const nativeAddr = parseAndResolveArkUri(arkAddress, aspInfo)
+        sendOffChain(svcWallet!, details.total, nativeAddr)
+          .then((txId: string) => handleTxid(txId))
+          .catch(handleError)
+      } catch (err) {
+        handleError(err)
+      }
+    } else if (sendInfo.lnUrl && !invoice) {
+      // SatsPath Lightning alias — resolve via LNURL to get a BOLT11 invoice,
+      // then hand it back to the RFQ flow for the actual payment.
+      if (!details.satoshis || details.satoshis < 1) {
+        return handleError('Amount too low for Lightning payment')
+      }
+      fetchInvoice(sendInfo.lnUrl, details.satoshis, '')
+        .then((bolt11) => {
+          // Store invoice and trigger re-render; the next branch handles it.
+          setSendInfo((prev) => ({ ...prev, invoice: bolt11 }))
+          setSending(false) // let the updated sendInfo re-trigger handleContinue
+        })
+        .catch(handleError)
     } else if (arkAddress) {
       if (!details.total) return handleError('Missing total amount')
       sendOffChain(svcWallet, details.total, arkAddress)
         .then((txId: string) => handleTxid(txId))
         .catch(handleError)
-    } else if (sendInfo.lnUrl && !invoice) {
-      // SatsPath Lightning address — needs LNURL resolution from the recipient's domain
-      handleError('SatsPath Lightning payment needs an LNURL server at the recipient\'s domain. Try On-chain instead.')
     } else if (invoice && pendingLnSend) {
       // RFQ Lightning send. The address below is the wallet's OWN derivation
       // of the lockup covenant (the client refuses a mismatched quote), so

@@ -53,7 +53,7 @@ import { calcBatchLifetimeMs, calcNextRollover } from '../lib/wallet'
 import { setLoadingStatus } from '../lib/loadingStatus'
 import { hex } from '@scure/base'
 import * as secp from '@noble/secp256k1'
-import * as bip39 from 'bip39'
+import { mnemonicToSeedSync } from '@scure/bip39'
 import { derive_identity_keypair_from_seed } from '@satspath/wasm'
 import { ConfigContext } from './config'
 import { SatsPathContext } from './satspath'
@@ -179,7 +179,7 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
   const { navigate } = useContext(NavigationContext)
   const { setNoteInfo, noteInfo, setDeepLinkInfo, deepLinkInfo } = useContext(FlowContext)
   const { notifyTxSettled } = useContext(NotificationsContext)
-  const { deriveIdentity: deriveSatsPathIdentity } = useContext(SatsPathContext)
+  const { deriveIdentity: deriveSatsPathIdentity, autoSyncMethods: autoSyncSatsPathMethods } = useContext(SatsPathContext)
 
   // One atomic snapshot: the metadata graft must land in the same render as
   // the history it belongs to.
@@ -816,7 +816,7 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
 
       // Derive SatsPath identity from the same seed (m/9737'/0')
       try {
-        const seed = bip39.mnemonicToSeedSync(credentials.mnemonic)
+        const seed = mnemonicToSeedSync(credentials.mnemonic)
         const satspathIdentity = derive_identity_keypair_from_seed(seed, 0)
         if (satspathIdentity) {
           updateConfig({ ...config, pubkey, walletMode, satspathPubkey: satspathIdentity.pubkey_hex })
@@ -851,6 +851,32 @@ export const WalletProvider = ({ children }: { children: ReactNode }) => {
     if (!didInit) return
     updateWallet({ ...wallet, network, pubkey })
     setInitialized(true)
+
+    // Auto-sync the wallet's 3 payment-rail addresses to the SatsPath profile.
+    // getReceivingAddresses may not resolve immediately after init — attempt
+    // the sync optimistically; a failed sync is non-fatal (localStorage is the
+    // source of truth and the daemon will be retried on reconnect).
+    try {
+      const { getReceivingAddresses } = await import('../lib/asp')
+      // svcWallet state update may not have propagated yet; build a temporary
+      // reference from the service worker wallet returned by initSvcWorkerWallet.
+      // We use the module-level svcWallet state via the closure below — by the
+      // time await resolves the state is already set inside initSvcWorkerWallet.
+      const svcWalletRef = svcWallet // captured from closure after init
+      if (svcWalletRef) {
+        const addrs = await getReceivingAddresses(svcWalletRef)
+        await autoSyncSatsPathMethods({
+          // Lightning address: use the locally-stored SatsPath alias if set
+          lightning_address: localStorage.getItem('satspath_alias') ?? undefined,
+          onchain_address: addrs.boardingAddr || undefined,
+          ark_server: aspInfo.url || undefined,
+          ark_pubkey: aspInfo.signerPubkey || undefined,
+          ark_address: addrs.offchainAddr || undefined,
+        })
+      }
+    } catch (err) {
+      consoleError(err, 'SatsPath auto-sync after wallet init failed (non-fatal)')
+    }
   }
 
   const unlockWallet = async (password: string) => {

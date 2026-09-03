@@ -1,29 +1,29 @@
 /* UI-specific vars not covered by tokens.css */
 :root {
-  --background-focused: var(--purple20);
-  --btn-shadow-color: var(--purple-950);
-  --control-secondary-bg: color-mix(in srgb, var(--purple-100) 18%, var(--neutral-50));
-  --control-secondary-fg: var(--fg);
-  --control-secondary-ring: color-mix(in srgb, var(--fg) 5%, transparent);
-  --control-secondary-shadow: color-mix(in srgb, var(--purple-800) 18%, transparent);
+  --background-focused: #1a1a1a;
+  --btn-shadow-color: #800000;
+  --control-secondary-bg: #1a1a1a;
+  --control-secondary-fg: #ffffff;
+  --control-secondary-ring: rgba(255, 255, 255, 0.1);
+  --control-secondary-shadow: rgba(0, 0, 0, 0.5);
   --font-body: var(--font-family-sans);
-  --header-divider: color-mix(in srgb, var(--fg) 5%, transparent);
-  --sheet-bg: var(--bg);
+  --header-divider: rgba(255, 255, 255, 0.08);
+  --sheet-bg: #121212;
   --toast-bg: #1a1a1a;
-  --toast-color: #fafafa;
+  --toast-color: #ffffff;
 }
 
 html.palette-dark {
-  --background-focused: var(--neutral-100);
-  --control-secondary-bg: color-mix(in srgb, var(--purple-500) 14%, var(--neutral-50));
-  --control-secondary-fg: var(--fg);
-  --control-secondary-ring: color-mix(in srgb, var(--fg) 6%, transparent);
-  --control-secondary-shadow: color-mix(in srgb, var(--bg) 72%, transparent);
-  --header-divider: color-mix(in srgb, var(--fg) 4%, transparent);
-  --sheet-bg: #1a1a1a;
-  --toast-bg: #2a2a2a;
-  --toast-color: #e0e0e0;
-  --rsbs-bg: #202020;
+  --background-focused: #1a1a1a;
+  --control-secondary-bg: #1a1a1a;
+  --control-secondary-fg: #ffffff;
+  --control-secondary-ring: rgba(255, 255, 255, 0.12);
+  --control-secondary-shadow: rgba(0, 0, 0, 0.8);
+  --header-divider: rgba(255, 255, 255, 0.08);
+  --sheet-bg: #121212;
+  --toast-bg: #1a1a1a;
+  --toast-color: #ffffff;
+  --rsbs-bg: #121212;
   --tab-bar-background: transparent;
 }
 
@@ -129,6 +129,8 @@ html.wallet-success-surface-active body::before {
 
 body {
   margin: 0;
+  color: var(--fg, #ffffff);
+  background-color: var(--bg, #000000);
   font-family:
     'Geist', 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
@@ -898,11 +900,15 @@ iframe {
   border: 0;
   appearance: none;
   background: transparent;
-  color: inherit;
+  color: var(--fg, #ffffff);
   font-variant-numeric: inherit;
   max-width: 100%;
   padding: 0;
   text-align: inherit;
+}
+
+.home-stack__hero {
+  color: var(--fg, #ffffff);
 }
 
 .privacy-amount--interactive {

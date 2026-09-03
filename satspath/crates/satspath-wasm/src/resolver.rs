@@ -137,7 +137,15 @@ impl LocalRegistry {
     pub fn add_profile(&mut self, profile_json: String) -> Result<(), String> {
         let profile: SignedPaymentProfile =
             serde_json::from_str(&profile_json).map_err(|e| e.to_string())?;
-        Err("Use JavaScript to manage profiles".to_string())
+        // Upsert: remove existing profile with the same alias (case-insensitive),
+        // then push the new one. This mirrors what the SatsPath daemon does on
+        // profile updates and lets the wallet load locally-cached profiles into
+        // the WASM resolver for offline resolution.
+        self.profiles.retain(|p| {
+            p.profile.alias.to_lowercase() != profile.profile.alias.to_lowercase()
+        });
+        self.profiles.push(profile);
+        Ok(())
     }
 
     pub fn list_profiles(&self) -> Vec<String> {

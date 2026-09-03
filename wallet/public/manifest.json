@@ -1,6 +1,6 @@
 {
-  "short_name": "Arkade",
-  "name": "Arkade",
+  "short_name": "SatsPath",
+  "name": "SatsPath Wallet",
   "icons": [
     {
       "src": "favicon.ico",
@@ -26,11 +26,11 @@
   ],
   "start_url": ".",
   "display": "standalone",
-  "theme_color": "#fff",
-  "background_color": "#ffffff",
+  "theme_color": "#000000",
+  "background_color": "#000000",
   "protocol_handlers": [
     {
-      "protocol": "web+arkade",
+      "protocol": "web+satspath",
       "url": "/#%s"
     }
   ]

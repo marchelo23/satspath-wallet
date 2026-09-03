@@ -18,9 +18,24 @@ import { extractError } from '../../lib/error'
 import { consoleError } from '../../lib/logs'
 import { getReceivingAddresses } from '../../lib/asp'
 import { isMainnet } from '../../lib/constants'
-import ButtonsOnBottom from '../../components/ButtonsOnBottom'
 
 const monoStyle = { fontFamily: 'monospace', wordBreak: 'break-all' as const }
+
+/** Colour + label for each SatsPath operating mode */
+function ModeIndicator({ mode }: { mode: 'daemon' | 'local' | 'offline' }) {
+  const map = {
+    daemon: { color: '#22c55e', label: '● Daemon connected — profile is publicly resolvable' },
+    local: { color: '#f59e0b', label: '● Local only — others cannot find you until daemon starts' },
+    offline: { color: '#ef4444', label: '● Offline — SatsPath not available' },
+  } as const
+
+  const { color, label } = map[mode]
+  return (
+    <span style={{ fontSize: '0.75rem', color }}>
+      {label}
+    </span>
+  )
+}
 
 export default function SatsPathProfile() {
   const {
@@ -29,30 +44,31 @@ export default function SatsPathProfile() {
     daemonConnected,
     daemonProfile,
     daemonStatus,
+    mode,
+    localAlias,
     registerAlias,
     verifyAlias,
     updateProfileMethods,
+    autoSyncMethods,
+    persistAlias,
     refreshDaemonProfile,
   } = useContext(SatsPathContext)
-  const { config } = useContext(ConfigContext)
+  const { config, updateConfig } = useContext(ConfigContext)
   const { aspInfo } = useContext(AspContext)
   const { svcWallet } = useContext(WalletContext)
   const { toast } = useToast()
 
   const [loading, setLoading] = useState(false)
-  const [addresses, setAddresses] = useState<{ boardingAddr: string; offchainAddr: string } | null>(
-    null,
-  )
+  const [addresses, setAddresses] = useState<{ boardingAddr: string; offchainAddr: string } | null>(null)
   const [aliasInput, setAliasInput] = useState('')
   const [challengeToken, setChallengeToken] = useState('')
   const [challengeMessage, setChallengeMessage] = useState('')
-  const [challengeId, setChallengeId] = useState('')
-  const [registrationStep, setRegistrationStep] = useState<
-    'idle' | 'challenge' | 'verify' | 'methods'
-  >('idle')
+  const [registrationStep, setRegistrationStep] = useState<'idle' | 'challenge' | 'verify' | 'done'>('idle')
 
-  const registeredAlias = daemonProfile?.wallet?.alias
+  // The active alias — prefer daemon profile, fall back to local storage
+  const activeAlias = daemonProfile?.wallet?.alias || localAlias
 
+  // Load receiving addresses (boarding + offchain)
   useEffect(() => {
     if (!svcWallet) return
     getReceivingAddresses(svcWallet)
@@ -64,69 +80,98 @@ export default function SatsPathProfile() {
       .catch((err) => consoleError(err, 'Failed to get receiving addresses'))
   }, [svcWallet])
 
+  // Pre-fill alias input from config or localStorage
+  useEffect(() => {
+    if (activeAlias && !aliasInput) {
+      setAliasInput(activeAlias)
+    }
+  }, [activeAlias])
+
+  // ── Registration flow ──────────────────────────────────────────────────────
+
   const handleCreateChallenge = async () => {
-    if (!aliasInput) {
-      toast('Enter an alias first')
-      return
-    }
-    if (!aliasInput.includes('@')) {
-      toast('Invalid alias format (user@domain)')
-      return
-    }
+    if (!aliasInput) return toast('Enter an alias first')
+    if (!aliasInput.includes('@')) return toast('Invalid alias format — use user@domain.com')
+
     setLoading(true)
     try {
       const result = await registerAlias(aliasInput)
-      setChallengeId(result.challengeId)
+
+      // Daemon offline path: alias was saved locally, skip challenge
+      if (result.challengeId === 'local') {
+        // Also persist in wallet config
+        updateConfig({ ...config, satspathAlias: aliasInput })
+        toast('Alias saved locally. Start satspathd to publish it publicly.')
+        setRegistrationStep('done')
+        return
+      }
+
       setChallengeMessage(result.message)
       setRegistrationStep('challenge')
       toast('Verification code sent')
     } catch (err) {
-      const msg = extractError(err)
+      toast(`Challenge failed: ${extractError(err)}`)
       consoleError(err, 'Failed to create challenge')
-      toast(`Challenge failed: ${msg}`)
     } finally {
       setLoading(false)
     }
   }
 
   const handleVerify = async () => {
-    if (!aliasInput || !challengeToken) {
-      toast('Enter the verification token')
-      return
-    }
+    if (!aliasInput || !challengeToken) return toast('Enter the verification token')
     setLoading(true)
     try {
       await verifyAlias(aliasInput, challengeToken)
-      setRegistrationStep('methods')
+      // Save to wallet config for persistence
+      updateConfig({ ...config, satspathAlias: aliasInput })
       toast('Alias verified!')
       await refreshDaemonProfile()
+      setRegistrationStep('done')
     } catch (err) {
-      const msg = extractError(err)
+      toast(`Verification failed: ${extractError(err)}`)
       consoleError(err, 'Failed to verify alias')
-      toast(`Verification failed: ${msg}`)
     } finally {
       setLoading(false)
     }
   }
 
   const handlePublishMethods = async () => {
-    if (!addresses) {
-      toast('Addresses not ready')
-      return
-    }
+    if (!addresses) return toast('Addresses not ready yet')
     setLoading(true)
     try {
       await updateProfileMethods({
-        lightning_address: registeredAlias || aliasInput,
+        lightning_address: activeAlias || aliasInput || undefined,
         onchain_address: addresses.boardingAddr,
+        ark_server: aspInfo.url || undefined,
+        ark_pubkey: aspInfo.signerPubkey || undefined,
+        ark_address: addresses.offchainAddr,
       })
-      setRegistrationStep('idle')
       toast('Profile published!')
       await refreshDaemonProfile()
     } catch (err) {
-      const msg = extractError(err)
+      toast(`Publish failed: ${extractError(err)}`)
       consoleError(err, 'Failed to publish methods')
-      toast(`Publish failed: ${msg}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  /** Force-push current addresses to daemon (manual refresh) */
+  const handleForceSync = async () => {
+    if (!addresses) return toast('Addresses not loaded yet')
+    setLoading(true)
+    try {
+      await autoSyncMethods({
+        lightning_address: activeAlias || undefined,
+        onchain_address: addresses.boardingAddr,
+        ark_server: aspInfo.url || undefined,
+        ark_pubkey: aspInfo.signerPubkey || undefined,
+        ark_address: addresses.offchainAddr,
+      })
+      await refreshDaemonProfile()
+      toast('Synced!')
+    } catch (err) {
+      toast(`Sync failed: ${extractError(err)}`)
     } finally {
       setLoading(false)
     }
@@ -142,7 +187,7 @@ export default function SatsPathProfile() {
       <>
         <Header text='SatsPath Profile' back />
         <Content>
-          <LoadingLogo text='Initializing SatsPath...' />
+          <LoadingLogo text='Initializing SatsPath…' />
         </Content>
       </>
     )
@@ -154,46 +199,39 @@ export default function SatsPathProfile() {
       <Content>
         <Padded>
           <FlexCol gap='1.5rem'>
-            {/* Daemon Status */}
+
+            {/* ── Mode + Daemon Status ───────────────────────────────────────── */}
             <Shadow>
-              <FlexCol gap='1rem' padding='1rem'>
+              <FlexCol gap='0.75rem' padding='1rem'>
                 <FlexRow between>
-                  <Text bold>Daemon</Text>
-                  <Text color={daemonConnected ? 'green' : 'red'} small>
-                    {daemonConnected ? 'Connected' : 'Disconnected'}
-                  </Text>
+                  <Text bold>SatsPath Status</Text>
+                  {daemonConnected && (
+                    <Button secondary onClick={handleForceSync} disabled={loading}>
+                      ↺ Sync
+                    </Button>
+                  )}
                 </FlexRow>
+
+                <ModeIndicator mode={mode} />
+
                 {daemonStatus && (
-                  <FlexCol gap='0.5rem'>
-                    <Text small color='neutral-500'>
-                      {daemonStatus.daemon} v{daemonStatus.version} ({daemonStatus.network})
-                    </Text>
-                    <Text small color='neutral-500'>
-                      {daemonStatus.bind}
-                    </Text>
-                  </FlexCol>
-                )}
-                {daemonStatus?.alias && (
-                  <FlexCol gap='0.5rem'>
-                    <Text small>Registered as:</Text>
-                    <p style={monoStyle}>
-                      <Text small>{daemonStatus.alias}</Text>
-                    </p>
-                  </FlexCol>
+                  <Text small color='neutral-500'>
+                    {daemonStatus.daemon} v{daemonStatus.version} · {daemonStatus.bind} · {daemonStatus.network}
+                  </Text>
                 )}
               </FlexCol>
             </Shadow>
 
-            {/* Identity Section */}
+            {/* ── Identity ──────────────────────────────────────────────────── */}
             <Shadow>
-              <FlexCol gap='1rem' padding='1rem'>
+              <FlexCol gap='0.75rem' padding='1rem'>
                 <Text bold>Identity</Text>
                 <Text color='neutral-500' small>
-                  Derived from wallet seed at m/9737'/0'
+                  Derived from wallet seed at m/9737'/0' (secp256k1 Schnorr)
                 </Text>
 
                 {identity ? (
-                  <FlexCol gap='0.5rem'>
+                  <FlexCol gap='0.25rem'>
                     <FlexRow between>
                       <Text small>Public Key</Text>
                       <Button copy onClick={() => handleCopy(identity.pubkey_hex, 'Public key')}>
@@ -206,20 +244,82 @@ export default function SatsPathProfile() {
                   </FlexCol>
                 ) : (
                   <Text color='neutral-500' small>
-                    No identity derived yet
+                    No identity derived yet — unlock your wallet first
                   </Text>
                 )}
               </FlexCol>
             </Shadow>
 
-            {/* Registration Section */}
-            {!registeredAlias && (
+            {/* ── 3 Payment Rails ───────────────────────────────────────────── */}
+            {addresses && (
+              <Shadow>
+                <FlexCol gap='0.75rem' padding='1rem'>
+                  <Text bold>Payment Rails</Text>
+                  <Text color='neutral-500' small>
+                    Your 3 addresses that SatsPath publishes to the network
+                  </Text>
+
+                  {/* Lightning / LNURL (uses your alias as a Lightning address) */}
+                  <FlexCol gap='0.25rem'>
+                    <Text small color='neutral-500'>⚡ Lightning (alias as Lightning address)</Text>
+                    <p style={monoStyle}>
+                      <Text small>{activeAlias || '—'}</Text>
+                    </p>
+                  </FlexCol>
+
+                  {/* Ark off-chain address */}
+                  <FlexCol gap='0.25rem'>
+                    <FlexRow between>
+                      <Text small color='neutral-500'>🏹 Ark (off-chain)</Text>
+                      <Button copy secondary onClick={() => handleCopy(addresses.offchainAddr, 'Ark address')}>
+                        Copy
+                      </Button>
+                    </FlexRow>
+                    <p style={monoStyle}>
+                      <Text small>{addresses.offchainAddr}</Text>
+                    </p>
+                  </FlexCol>
+
+                  {/* On-chain boarding address */}
+                  <FlexCol gap='0.25rem'>
+                    <FlexRow between>
+                      <Text small color='neutral-500'>⛓️ On-chain (Bitcoin)</Text>
+                      <Button copy secondary onClick={() => handleCopy(addresses.boardingAddr, 'On-chain address')}>
+                        Copy
+                      </Button>
+                    </FlexRow>
+                    <p style={monoStyle}>
+                      <Text small>{addresses.boardingAddr}</Text>
+                    </p>
+                  </FlexCol>
+
+                  {aspInfo.url && (
+                    <FlexCol gap='0.25rem'>
+                      <Text small color='neutral-500'>ASP Server</Text>
+                      <Text small>{aspInfo.url}</Text>
+                    </FlexCol>
+                  )}
+                </FlexCol>
+              </Shadow>
+            )}
+
+            {/* ── Alias Registration ────────────────────────────────────────── */}
+            {!activeAlias && (
               <Shadow>
                 <FlexCol gap='1rem' padding='1rem'>
-                  <Text bold>Register Alias</Text>
+                  <Text bold>Register Your Alias</Text>
                   <Text color='neutral-500' small>
-                    Claim your human-readable Bitcoin address
+                    Claim a human-readable Bitcoin address like{' '}
+                    <em>you@example.com</em> — SatsPath will route payers to
+                    the cheapest rail automatically.
                   </Text>
+
+                  {mode !== 'daemon' && (
+                    <span style={{ fontSize: '0.75rem', color: '#f59e0b' }}>
+                      ⚠️ Daemon is offline. Your alias will be saved locally and
+                      published when satspathd starts.
+                    </span>
+                  )}
 
                   {registrationStep === 'idle' && (
                     <>
@@ -235,6 +335,8 @@ export default function SatsPathProfile() {
                           background: '#1a1a1a',
                           color: '#fff',
                           fontFamily: 'monospace',
+                          width: '100%',
+                          boxSizing: 'border-box',
                         }}
                       />
                       <Button
@@ -250,6 +352,9 @@ export default function SatsPathProfile() {
                       <Text color='neutral-500' small>
                         {challengeMessage}
                       </Text>
+                      <Text small color='neutral-500'>
+                        (Mock mode: paste your email address as the token)
+                      </Text>
                       <input
                         type='text'
                         value={challengeToken}
@@ -262,6 +367,8 @@ export default function SatsPathProfile() {
                           background: '#1a1a1a',
                           color: '#fff',
                           fontFamily: 'monospace',
+                          width: '100%',
+                          boxSizing: 'border-box',
                         }}
                       />
                       <Button
@@ -272,91 +379,50 @@ export default function SatsPathProfile() {
                     </>
                   )}
 
-                  {registrationStep === 'methods' && addresses && (
-                    <>
-                      <Text color='green' small>
-                        Alias verified! Now publish your payment methods.
-                      </Text>
-                      <Text small>Lightning: {registeredAlias || aliasInput}</Text>
-                      <Text small>On-chain: {addresses.boardingAddr}</Text>
-                      <Button
-                        label='Publish Profile'
-                        onClick={handlePublishMethods}
-                        disabled={loading}
-                      />
-                    </>
-                  )}
-                </FlexCol>
-              </Shadow>
-            )}
-
-            {/* Published Profile */}
-            {daemonProfile && (
-              <Shadow>
-                <FlexCol gap='1rem' padding='1rem'>
-                  <Text bold>Published Profile</Text>
-                  {daemonProfile.wallet.alias && (
-                    <Text small>Alias: {daemonProfile.wallet.alias}</Text>
-                  )}
-                  {daemonProfile.wallet.lightning_address && (
-                    <Text small>Lightning: {daemonProfile.wallet.lightning_address}</Text>
-                  )}
-                  {daemonProfile.wallet.onchain_address && (
-                    <Text small>On-chain: {daemonProfile.wallet.onchain_address}</Text>
-                  )}
-                  {daemonProfile.signature_valid !== undefined && (
-                    <Text color={daemonProfile.signature_valid ? 'green' : 'red'} small>
-                      Signature: {daemonProfile.signature_valid ? 'Valid' : 'Invalid'}
+                  {registrationStep === 'done' && !activeAlias && (
+                    <Text color='green' small>
+                      ✓ Alias saved. Publish your payment methods below.
                     </Text>
                   )}
                 </FlexCol>
               </Shadow>
             )}
 
-            {/* Addresses Section */}
-            {addresses && (
+            {/* ── Publish / Update Methods ──────────────────────────────────── */}
+            {(activeAlias || registrationStep === 'done') && addresses && (
               <Shadow>
-                <FlexCol gap='1rem' padding='1rem'>
-                  <Text bold>Local Wallet Addresses</Text>
-
-                  <FlexCol gap='0.5rem'>
-                    <FlexRow between>
-                      <Text small color='neutral-500'>
-                        Arkade Address (Off-chain)
+                <FlexCol gap='0.75rem' padding='1rem'>
+                  <FlexRow between>
+                    <Text bold>Published Profile</Text>
+                    {daemonProfile?.signature_valid !== undefined && (
+                      <Text color={daemonProfile.signature_valid ? 'green' : 'red'} small>
+                        {daemonProfile.signature_valid ? '✓ Signature valid' : '✗ Invalid signature'}
                       </Text>
-                      <Button
-                        copy
-                        secondary
-                        onClick={() => handleCopy(addresses.offchainAddr, 'Off-chain address')}
-                      >
-                        Copy
-                      </Button>
-                    </FlexRow>
-                    <p style={monoStyle}>
-                      <Text small>{addresses.offchainAddr}</Text>
-                    </p>
-                  </FlexCol>
+                    )}
+                  </FlexRow>
 
-                  <FlexCol gap='0.5rem'>
+                  {activeAlias && (
                     <FlexRow between>
-                      <Text small color='neutral-500'>
-                        Bitcoin Address (On-chain)
-                      </Text>
-                      <Button
-                        copy
-                        secondary
-                        onClick={() => handleCopy(addresses.boardingAddr, 'On-chain address')}
-                      >
-                        Copy
-                      </Button>
-                    </FlexRow>
-                    <p style={monoStyle}>
-                      <Text small>{addresses.boardingAddr}</Text>
-                    </p>
-                  </FlexCol>
+                    <Text small>Alias</Text>
+                    <span style={monoStyle}>
+                      <Text small>{activeAlias}</Text>
+                    </span>
+                  </FlexRow>
+                  )}
+
+                  <Button
+                    label='Publish / Update Methods'
+                    onClick={handlePublishMethods}
+                    disabled={loading || !addresses}
+                  />
+                  <Text color='neutral-500' smaller>
+                    This publishes your Lightning, Ark, and On-chain addresses
+                    so that anyone using SatsPath can pay you.
+                  </Text>
                 </FlexCol>
               </Shadow>
             )}
+
           </FlexCol>
         </Padded>
       </Content>

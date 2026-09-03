@@ -180,7 +180,7 @@ export default function InAppBrowser() {
                   }
                   transition={{ duration: 0.3, ease: EASE_OUT_QUINT_TUPLE }}
                 >
-                  <h1 style={{ ...titleStyle, paddingLeft: 4 }}>Welcome to Arkade 👾</h1>
+                  <h1 style={{ ...titleStyle, paddingLeft: 4 }}>Welcome to SatsPath ⚡</h1>
                   <Text color='neutral-500' thin wrap>
                     Won't work in this browser.
                   </Text>

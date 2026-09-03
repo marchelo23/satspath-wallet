@@ -42,15 +42,30 @@ export const extractRailFromQuote = (
 
   switch (selected_method.type) {
     case 'Lightning':
-      // Lightning address — wallet needs to resolve via LNURL to get BOLT11
+      // Lightning address or LNURL — wallet resolves via LNURL to get BOLT11
       return { lnUrl: qr }
     case 'Ark':
-      // For Ark, try to extract native tark address from qr or use it as-is
-      // The wallet.send() only accepts tark1qq... format addresses
+      // Direct native address (tark1qq... or ark1qq...)
       if (qr.startsWith('tark1') || qr.startsWith('ark1')) {
         return { arkAddress: qr }
       }
-      // ark: URI — store as lnUrl won't help; mark as unsupported for now
+      // If ark: URI contains a native address in pathname or query
+      if (qr.startsWith('ark:')) {
+        try {
+          const stripped = qr.slice('ark:'.length)
+          const [mainPart, queryPart] = stripped.split('?')
+          if (mainPart.startsWith('tark1') || mainPart.startsWith('ark1')) {
+            return { arkAddress: mainPart }
+          }
+          if (queryPart) {
+            const params = new URLSearchParams(queryPart)
+            const addr = params.get('address') || params.get('opaque_uri')
+            if (addr && (addr.startsWith('tark1') || addr.startsWith('ark1'))) {
+              return { arkAddress: addr }
+            }
+          }
+        } catch {}
+      }
       return { arkAddress: qr }
     case 'Onchain':
       return { address: extractBtcAddressFromBip21(qr) }
@@ -112,7 +127,14 @@ export const isQuoteReady = (quote: SatsPathQuote | null | undefined): boolean =
  * Build a QR string for a specific payment method and amount
  */
 export const buildQrForRail = (
-  method: { type: string; lightning_address?: string; address?: string; server?: string; pubkey?: string },
+  method: {
+    type: string
+    lightning_address?: string
+    address?: string
+    server?: string
+    pubkey?: string
+    opaque_uri?: string
+  },
   amountSats: number,
 ): string => {
   switch (method.type) {
@@ -121,6 +143,9 @@ export const buildQrForRail = (
     case 'Onchain':
       return method.address ? `bitcoin:${method.address}?amount=${(amountSats / 1e8).toFixed(8)}` : ''
     case 'Ark':
+      if (method.opaque_uri) return method.opaque_uri
+      if (method.pubkey?.startsWith('tark1') || method.pubkey?.startsWith('ark1')) return method.pubkey
+      if (method.address?.startsWith('tark1') || method.address?.startsWith('ark1')) return method.address
       return method.server && method.pubkey
         ? `ark:${method.pubkey}?server=${encodeURIComponent(method.server)}&amount=${amountSats}`
         : ''

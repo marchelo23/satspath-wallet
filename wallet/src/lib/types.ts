@@ -21,6 +21,8 @@ export type Config = {
   notifications: boolean
   pubkey: string
   satspathPubkey?: string
+  /** Human-readable SatsPath alias (e.g. "chelo@satspath.com") */
+  satspathAlias?: string
   showBalance: boolean
   dismissedBanners: string[]
   theme: Themes

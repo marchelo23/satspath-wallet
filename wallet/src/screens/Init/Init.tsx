@@ -171,7 +171,7 @@ export default function Init() {
                     data-testid='onboarding-devmode-tap'
                     style={{ ...titleStyle, paddingLeft: 4, cursor: 'default' }}
                   >
-                    Welcome to Arkade 👾
+                    Welcome to SatsPath ⚡
                   </h1>
                 </motion.div>
               </div>

@@ -208,9 +208,10 @@ pub fn validate_ark_server_url(server: &str) -> Result<()> {
     assert_no_private_material(server)?;
     let parsed =
         Url::parse(server).map_err(|e| SatsPathError::InvalidPaymentPointer(e.to_string()))?;
-    if parsed.scheme() != "https" {
+    let is_local = matches!(parsed.host_str(), Some("localhost") | Some("127.0.0.1") | Some("0.0.0.0"));
+    if parsed.scheme() != "https" && !(parsed.scheme() == "http" && is_local) {
         return Err(SatsPathError::InvalidPaymentPointer(
-            "Ark server URL must use https".into(),
+            "Ark server URL must use https (http only allowed for localhost)".into(),
         ));
     }
     if parsed.host_str().is_none() {

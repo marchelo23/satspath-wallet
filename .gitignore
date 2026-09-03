@@ -48,6 +48,8 @@ node_modules/
 /playwright/.cache/
 /playwright/.auth/
 /dev-dist/
+wallet/screenshots-e2e/
+screenshots-e2e/
 
 # plans
 docs/plans/

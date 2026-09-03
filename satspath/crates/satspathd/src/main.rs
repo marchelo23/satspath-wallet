@@ -85,6 +85,8 @@ struct WalletState {
     #[serde(skip_serializing_if = "Option::is_none")]
     ark_pubkey: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    ark_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     created_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     updated_at: Option<i64>,
@@ -137,6 +139,7 @@ struct ProfileUpdateRequest {
     onchain_pubkey: Option<String>,
     ark_server: Option<String>,
     ark_pubkey: Option<String>,
+    ark_address: Option<String>,
     #[serde(default)]
     remove_methods: Vec<String>,
 }
@@ -788,6 +791,7 @@ fn verify_challenge(state: &AppState, body: VerifyRequest) -> Result<ProfileResp
     if wallet.lightning_address.is_some()
         || wallet.onchain_address.is_some()
         || wallet.ark_server.is_some()
+        || wallet.ark_address.is_some()
     {
         sign_and_store(&state.home, &mut wallet, &state.network)?;
     }
@@ -817,6 +821,7 @@ fn apply_method_updates(
         || body.onchain_pubkey.is_some()
         || body.ark_server.is_some()
         || body.ark_pubkey.is_some()
+        || body.ark_address.is_some()
         || !body.remove_methods.is_empty();
     if !allow_empty && !has_method {
         anyhow::bail!("provide at least one receive method");
@@ -832,6 +837,7 @@ fn apply_method_updates(
             "ark" => {
                 wallet.ark_server = None;
                 wallet.ark_pubkey = None;
+                wallet.ark_address = None;
             }
             _ => anyhow::bail!("unknown payment method removal: {method}"),
         }
@@ -851,15 +857,16 @@ fn apply_method_updates(
     if wallet.onchain_pubkey.is_some() && wallet.onchain_address.is_none() {
         anyhow::bail!("onchain_pubkey is a hint; provide onchain_address too");
     }
-    match (body.ark_server, body.ark_pubkey) {
-        (Some(server), Some(pubkey)) => {
-            validate_ark_server_url(&server)?;
-            validate_compressed_pubkey(&pubkey)?;
-            wallet.ark_server = Some(server);
-            wallet.ark_pubkey = Some(pubkey);
-        }
-        (None, None) => {}
-        _ => anyhow::bail!("ark_server and ark_pubkey must be provided together"),
+    if let Some(server) = body.ark_server {
+        validate_ark_server_url(&server)?;
+        wallet.ark_server = Some(server);
+    }
+    if let Some(pubkey) = body.ark_pubkey {
+        validate_compressed_pubkey(&pubkey)?;
+        wallet.ark_pubkey = Some(pubkey);
+    }
+    if let Some(addr) = body.ark_address {
+        wallet.ark_address = Some(addr);
     }
     wallet.updated_at = Some(now());
     Ok(())
@@ -1430,7 +1437,17 @@ fn build_methods(wallet: &WalletState, network: &str) -> Vec<PaymentMethod> {
             address_list: vec![],
         });
     }
-    if let (Some(server), Some(pubkey)) = (&wallet.ark_server, &wallet.ark_pubkey) {
+    if let Some(ark_addr) = &wallet.ark_address {
+        methods.push(PaymentMethod::Ark {
+            label: "Ark".into(),
+            server: wallet.ark_server.clone().unwrap_or_default(),
+            pubkey: wallet.ark_pubkey.clone().unwrap_or_default(),
+            vtxo_pointer: None,
+            opaque_uri: Some(ark_addr.clone()),
+            proof: None,
+            expires_at: None,
+        });
+    } else if let (Some(server), Some(pubkey)) = (&wallet.ark_server, &wallet.ark_pubkey) {
         methods.push(PaymentMethod::Ark {
             label: "Ark".into(),
             server: server.clone(),
@@ -1829,22 +1846,8 @@ fn json_header() -> Header {
 }
 
 fn cors_origin_header() -> Header {
-    // SEC-CORS: Restrict to local daemon UI and Arkade wallet origins.
-    // Override via SATSPATHD_CORS_ORIGIN env var for custom deployments.
-    let origin = std::env::var("SATSPATHD_CORS_ORIGIN").unwrap_or_else(|_| {
-        "http://localhost:5173, http://localhost:3000, http://127.0.0.1:5173, https://app.arkade.money".to_string()
-    });
-    // Note: Access-Control-Allow-Origin only supports a single origin value or '*'.
-    // For multiple origins, the server should echo back the request Origin if it's
-    // in the allowed list. Since tiny_http doesn't give us per-request headers easily,
-    // we use the first allowed origin as default. In production, use a reverse proxy
-    // (nginx/caddy) for proper multi-origin CORS.
-    let first_origin = origin
-        .split(',')
-        .next()
-        .unwrap_or("http://localhost:5173")
-        .trim();
-    Header::from_bytes(&b"Access-Control-Allow-Origin"[..], first_origin.as_bytes())
+    let origin = std::env::var("SATSPATHD_CORS_ORIGIN").unwrap_or_else(|_| "*".to_string());
+    Header::from_bytes(&b"Access-Control-Allow-Origin"[..], origin.as_bytes())
         .expect("valid static header")
 }
 
@@ -1859,7 +1862,7 @@ fn cors_methods_header() -> Header {
 fn cors_headers_header() -> Header {
     Header::from_bytes(
         &b"Access-Control-Allow-Headers"[..],
-        &b"Content-Type, Authorization, X-Request-Id"[..],
+        &b"Content-Type, Authorization, X-Request-Id, X-Build-Version"[..],
     )
     .expect("valid static header")
 }

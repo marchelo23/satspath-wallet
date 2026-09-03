@@ -429,6 +429,10 @@ export default function SendForm() {
           consoleError(err, 'error parsing ark note')
         }
       }
+      if (isSatsPathAlias(lowerCaseData)) {
+        setRecipientError('')
+        return
+      }
       if (isValidLnUrl(lowerCaseData)) {
         return setSendInfo({ ...sendInfo, lnUrl: lowerCaseData })
       }
@@ -576,7 +580,7 @@ export default function SendForm() {
     if (min > balance) return setError('Insufficient funds for LNURL')
     if (satoshis && satoshis < min) return setError(`Amount below LNURL min limit`)
     if (satoshis && satoshis > max) return setError(`Amount above LNURL max limit`)
-    if (min === max) {
+        if (min === max) {
       setAmountIsReadOnly(true)
     } else {
       setAmountIsReadOnly(false)
@@ -630,16 +634,16 @@ export default function SendForm() {
     if (!address && (arkAddress || invoice || lnUrl) && !vtxoTxsAllowed()) {
       return setRecipientError('Sending offchain not allowed')
     }
-    // check if server key is valid
-    if (arkAddress && arkAddress.length > 0) {
-      const { serverPubKey } = decodeArkAddress(arkAddress)
-      const { serverPubKey: expectedServerPubKey } = decodeArkAddress(offchainAddr)
-      if (serverPubKey !== expectedServerPubKey) {
-        // if there's no other way to pay, show error
-        if (!address && !invoice) return setRecipientError('Arkade server key mismatch')
-        // remove ark address from possibilities to send and continue
-        // we will try to pay to lightning or mainnet instead
-        setSendInfo({ ...sendInfo, arkAddress: '' })
+    // check if server key is valid (for native bech32 Ark addresses)
+    if (arkAddress && arkAddress.length > 0 && !arkAddress.startsWith('ark:')) {
+      try {
+        const { serverPubKey } = decodeArkAddress(arkAddress)
+        const { serverPubKey: expectedServerPubKey } = decodeArkAddress(offchainAddr)
+        if (serverPubKey !== expectedServerPubKey) {
+          return setRecipientError('Server key mismatch')
+        }
+      } catch (err) {
+        consoleError(err, 'error decoding ark address')
       }
     }
     // everything is ok, clean error
@@ -858,9 +862,9 @@ export default function SendForm() {
     setProcessing(true)
     const satoshis = sendInfo.satoshis ?? 0
     try {
-      if (sendInfo.lnUrl && lnUrlResponse) {
+      if (sendInfo.lnUrl) {
         // Check if Ark method is available
-        const arkMethod = lnUrlResponse.transferAmounts?.find((method) => method.method === 'Ark' && method.available)
+        const arkMethod = lnUrlResponse?.transferAmounts?.find((method) => method.method === 'Ark' && method.available)
 
         if (arkMethod) {
           // Fetch Ark address instead of Lightning invoice

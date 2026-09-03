@@ -31,7 +31,7 @@ export default function Unavailable() {
     <CenterScreen>
       <WalletNewIcon />
       <Text bigger heading medium>
-        Arkade Wallet
+        SatsPath Wallet
       </Text>
       <ErrorMessage error text={error} />
     </CenterScreen>

@@ -63,7 +63,7 @@ export default function Wallet() {
 
   const pwaDescription = isIOS()
     ? "Tap the share icon in Safari's toolbar, then 'Add to Home Screen'."
-    : "Tap 'Install' to add Arkade to your home screen."
+    : "Tap 'Install' to add SatsPath to your home screen."
 
   const dismissPwaBanner = () => {
     if (!config) return
@@ -140,7 +140,7 @@ export default function Wallet() {
                   <DismissibleBanner
                     id='pwa-install'
                     icon={<HomeIcon />}
-                    title='Add Arkade to your home screen'
+                    title='Add SatsPath to your home screen'
                     description={pwaDescription}
                     action={
                       canPromptInstall()
