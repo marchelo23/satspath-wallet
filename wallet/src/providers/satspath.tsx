@@ -260,6 +260,17 @@ export const SatsPathProvider = ({ children }: { children: ReactNode }) => {
       })
   }, [])
 
+  // ── Auto-sync local state to daemon on reconnection ───────────────────────
+  const refreshDaemonProfile = useCallback(async () => {
+    try {
+      const profile = await daemonFetch<SatsPathDaemonProfile>('/v1/profile')
+      setDaemonProfile(profile)
+    } catch (err) {
+      consoleError(err, 'Failed to fetch daemon profile')
+      setDaemonProfile(null)
+    }
+  }, [])
+
   // ── Daemon health check (every 30 s) ─────────────────────────────────────
   const checkDaemonHealth = useCallback(async (): Promise<boolean> => {
     try {
@@ -280,17 +291,6 @@ export const SatsPathProvider = ({ children }: { children: ReactNode }) => {
     const interval = setInterval(checkDaemonHealth, 30_000)
     return () => clearInterval(interval)
   }, [checkDaemonHealth])
-
-  // ── Auto-sync local state to daemon on reconnection ───────────────────────
-  const refreshDaemonProfile = useCallback(async () => {
-    try {
-      const profile = await daemonFetch<SatsPathDaemonProfile>('/v1/profile')
-      setDaemonProfile(profile)
-    } catch (err) {
-      consoleError(err, 'Failed to fetch daemon profile')
-      setDaemonProfile(null)
-    }
-  }, [])
 
   useEffect(() => {
     if (!daemonConnected) {
