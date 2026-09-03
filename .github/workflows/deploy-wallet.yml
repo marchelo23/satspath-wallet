@@ -2,7 +2,7 @@ name: Deploy Wallet to GitHub Pages
 
 on:
   push:
-    branches: [ satspath-clean-start ]
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:
@@ -18,36 +18,40 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '22'
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
 
-    - name: Install pnpm
-      uses: pnpm/action-setup@v4
-      with:
-        version: 10.25.0
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+          cache-dependency-path: 'wallet/pnpm-lock.yaml'
 
-    - name: Install dependencies
-      working-directory: wallet
-      run: pnpm install --no-frozen-lockfile --ignore-scripts
+      - name: Install dependencies
+        working-directory: ./wallet
+        run: pnpm install
 
-    - name: Build wallet
-      working-directory: wallet
-      run: pnpm run build
-      env:
-        VITE_SATSPATH_URL: https://jackson-bend-segments-melbourne.trycloudflare.com
-        VITE_ARK_SERVER: https://mutinynet.arkade.sh
+      - name: Build Wallet
+        working-directory: ./wallet
+        env:
+          VITE_SATSPATH_API: "https://satspath-backend.up.railway.app"
+          VITE_NETWORK: "testnet"
+          VITE_ARK_SERVER: "https://mutinynet.arkade.sh"
+        run: pnpm run build --base=/satspath-wallet/
 
-    - name: Setup Pages
-      uses: actions/configure-pages@v5
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
 
-    - name: Upload artifact
-      uses: actions/upload-pages-artifact@v3
-      with:
-        path: wallet/dist
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './wallet/dist'
 
   deploy:
     environment:
@@ -56,6 +60,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-    - name: Deploy to GitHub Pages
-      id: deployment
-      uses: actions/deploy-pages@v4
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
